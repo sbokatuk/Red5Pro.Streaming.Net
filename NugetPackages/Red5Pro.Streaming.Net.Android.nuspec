@@ -1,0 +1,29 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2012/06/nuspec.xsd">
+  <metadata>
+    <id>Red5Pro.Streaming.Net.Android</id>
+    <version>5.6.0.</version>
+    <title>Xamarin bindings to the native Red5 Pro Android SDK.</title>
+    <authors>s.bokatuk</authors>
+    <owners>s.bokatuk</owners>
+    <license type="expression">MIT</license>
+    <licenseUrl>https://licenses.nuget.org/MIT</licenseUrl>
+    <icon>images/icon.png</icon>
+    <readme>README.md</readme>
+    <projectUrl>https://github.com/sbokatuk/Red5Pro.Net</projectUrl>
+    <description>MAUI Android Xamarin bindings for Red5 Pro SDK. Alows to use The Red5 Pro SDK in your app.</description>
+    <summary>.Net Xamarin Red5 Pro Android SDK, see https://github.com/red5pro/</summary>
+    <tags>Xamarin Red5 .Net Pro Android SDK Xamarin Xamarin.Android MAUI MAUI.Android .Net Binding</tags>
+    <dependencies>
+      <group targetFramework="net7.0-android33.0" />
+      <group targetFramework="net8.0-android34.0" />
+    </dependencies>
+  </metadata>
+  <files>
+      <file src="streaming/sdk.png" target="images/icon.png" />
+      <file src="streamingandroid/README.md" target="" />
+      <file src="streamingandroid/README.txt" target="" />
+      <file src="streamingandroid/lib/net7.0-android33.0/**" target="lib/net7.0-android33.0" />
+	  <file src="streamingandroid/lib/net8.0-android34.0/**" target="lib/net8.0-android34.0" />
+    </files>
+</package>

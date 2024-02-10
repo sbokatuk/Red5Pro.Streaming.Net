@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <Version>10.7.0.8</Version>
+    <authors>s.bokatuk</authors>
+    <owners>s.bokatuk</owners>
+    <title>Xamarin bindings to the native Red5 Pro Mac SDK.</title>
+    <projectUrl>https://github.com/sbokatuk/Red5Pro.Net</projectUrl>
+    <description>MAUI .Net Mac Xamarin bindings for Red5 Pro SDK. Alows to use The Red5 Pro SDK in your app.</description>
+    <summary>.Net Xamarin Red5 Pro Mac SDK, see https://github.com/red5pro/</summary>
+    <tags>Xamarin Red5 .Net Pro Mac SDK Xamarin Xamarin.Mac MAUI MAUI.Mac .Net Binding</tags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageId>Red5Pro.Streaming.Net.Mac</PackageId>
+    <AssemblyName>Red5Pro.Streaming.Net.Mac</AssemblyName>
+    <SynchReleaseVersion>false</SynchReleaseVersion>
+    <ReleaseVersion>4.2.6.1</ReleaseVersion>
+    <TargetFramework>net8.0-maccatalyst</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>true</ImplicitUsings>
+    <IsBindingProject>true</IsBindingProject>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+    <ObjcBindingApiDefinition Include="ApiDefinition.cs" />
+    <ObjcBindingCoreSource Include="StructsAndEnums.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="Red5Pro.Streaming.Net.Mac.targets">
+      <PackagePath>build/Red5Pro.Streaming.Net.Mac.targets</PackagePath>
+    </Content>
+  </ItemGroup>
+</Project>

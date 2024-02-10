@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <Version>5.6.0.8</Version>
+    <authors>s.bokatuk</authors>
+    <owners>s.bokatuk</owners>
+    <title>Xamarin bindings to the native Red5 Pro Android SDK.</title>
+    <projectUrl>https://github.com/sbokatuk/Red5Pro.Net</projectUrl>
+    <description>MAUI Android Xamarin bindings for Red5 Pro SDK. Alows to use The Red5 Pro SDK in your app.</description>
+    <summary>.Net Xamarin Red5 Pro Android SDK, see https://github.com/red5pro/</summary>
+    <tags>Xamarin Red5 .Net Pro Android SDK Xamarin Xamarin.Android MAUI MAUI.Android .Net Binding</tags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageId>Red5Pro.Streaming.Net.Android</PackageId>
+    <AssemblyName>Red5Pro.Streaming.Net.Android</AssemblyName>
+    <SynchReleaseVersion>false</SynchReleaseVersion>
+    <ReleaseVersion>4.2.6.1</ReleaseVersion>
+    <TargetFramework>net8.0-android</TargetFramework>
+    <SupportedOSPlatformVersion>21</SupportedOSPlatformVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+  <ItemGroup>
+    <Content Include="Red5Pro.Streaming.Net.Android.targets" PackagePath="build/NMSC.Android.targets" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+</Project>
