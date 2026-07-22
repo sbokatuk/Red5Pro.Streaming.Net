@@ -158,4 +158,29 @@
     <CheckEolWorkloads>false</CheckEolWorkloads>
   </PropertyGroup>
 
+  <!--
+    ============================================================================
+    Licence keys and endpoints
+    ============================================================================
+    None of this is needed to build the packages. It is read only by the things that talk to a real
+    server: the device smoke tests' licence and live tiers, and the sample app.
+
+    Environment first, local file second. MSBuild exposes environment variables as properties, so
+    the block below picks up what CI exports from repository secrets; Directory.Build.local.props
+    is then imported and fills in whatever is still empty, which is how a developer machine
+    supplies them without exporting anything.
+
+    The local file is git-ignored - these are paid credentials. See
+    Directory.Build.local.props.example.
+  -->
+  <PropertyGroup>
+    <Red5ProLicenseKey Condition=" '$(Red5ProLicenseKey)' == '' ">$(RED5_PRO_LICENSE_KEY)</Red5ProLicenseKey>
+    <Red5ProEndpoint Condition=" '$(Red5ProEndpoint)' == '' ">$(RED5_PRO_ENDPOINT)</Red5ProEndpoint>
+    <Red5CloudLicenseKey Condition=" '$(Red5CloudLicenseKey)' == '' ">$(RED5_CLOUD_LICENSE_KEY)</Red5CloudLicenseKey>
+    <Red5CloudEndpoint Condition=" '$(Red5CloudEndpoint)' == '' ">$(RED5_CLOUD_ENDPOINT)</Red5CloudEndpoint>
+  </PropertyGroup>
+
+  <Import Project="$(MSBuildThisFileDirectory)Directory.Build.local.props"
+          Condition="Exists('$(MSBuildThisFileDirectory)Directory.Build.local.props')" />
+
 </Project>

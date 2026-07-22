@@ -1,0 +1,46 @@
+<Project>
+
+  <!--
+    Copy to Directory.Build.local.props and fill in. That file is git-ignored and must stay that
+    way: an SDK licence key is a paid credential, and the endpoints identify your account.
+
+    Precedence is environment first, this file second. Directory.Build.props reads the RED5_*
+    environment variables before importing this, and every property below is conditioned on being
+    empty - so CI, which sets the environment from repository secrets, ignores this file entirely
+    and a developer machine does not need the variables exported.
+
+    Nothing here is required to *build* the packages. It is needed only by the things that talk to
+    a real server: the device smoke tests' licence and live tiers, and the sample app.
+  -->
+  <PropertyGroup>
+
+    <!--
+      Red5 Pro: the SDK licence key from https://account.red5.net/overview.
+
+      Note there are two keys on that page and they are not interchangeable - the "Server License"
+      activates a Red5 Pro server install, the "SDK License" activates the client. This is the SDK
+      one.
+    -->
+    <Red5ProLicenseKey Condition=" '$(Red5ProLicenseKey)' == '' "></Red5ProLicenseKey>
+
+    <!--
+      A standalone Red5 Pro server you run, host name or IP, no scheme. Leave empty if you only
+      use Red5 Cloud; the standalone live tier then skips rather than fails.
+    -->
+    <Red5ProEndpoint Condition=" '$(Red5ProEndpoint)' == '' "></Red5ProEndpoint>
+
+    <!--
+      Red5 Cloud: the Client SDK License from https://cloud.red5.net/resources.
+      A separate key from the Red5 Pro one above, issued by a separate account.
+    -->
+    <Red5CloudLicenseKey Condition=" '$(Red5CloudLicenseKey)' == '' "></Red5CloudLicenseKey>
+
+    <!--
+      Your stream manager host, e.g. userId-1234-abcdef.cloud.red5.net - host only, no scheme and
+      no path. The dashboard shows it inside a full https:// url; strip the scheme.
+    -->
+    <Red5CloudEndpoint Condition=" '$(Red5CloudEndpoint)' == '' "></Red5CloudEndpoint>
+
+  </PropertyGroup>
+
+</Project>

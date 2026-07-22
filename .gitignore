@@ -440,3 +440,9 @@ native/build/
 # Device-test output collected by the CI runner scripts.
 device-tests-logcat.txt
 device-tests-simulator.log
+
+# Local Red5 credentials: SDK licence keys and account endpoints. Never committed - the keys are
+# paid credentials. Copy Directory.Build.local.props.example to create it; CI supplies the same
+# values from repository secrets through the environment instead.
+Directory.Build.local.props
+red5.local.env
