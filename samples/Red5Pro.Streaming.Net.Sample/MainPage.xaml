@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:red5="clr-namespace:Red5Pro.Streaming.Net.Maui;assembly=Red5Pro.Streaming.Net.Maui"
+             x:Class="Red5Pro.Streaming.Net.Sample.MainPage"
+             Title="Red5Pro.Streaming.Net">
+
+    <Grid RowDefinitions="Auto,*,Auto,Auto" Padding="16" RowSpacing="12">
+
+        <VerticalStackLayout Grid.Row="0" Spacing="8">
+
+            <!--
+              The two deployment shapes are reached through different SDK calls, so the sample makes
+              the choice explicit rather than guessing from the host name - exactly as
+              Red5Options.Deployment does.
+            -->
+            <HorizontalStackLayout Spacing="12">
+                <RadioButton x:Name="CloudRadio" Content="Red5 Cloud" IsChecked="True"
+                             CheckedChanged="OnDeploymentChanged" />
+                <RadioButton x:Name="StandaloneRadio" Content="Red5 Pro (standalone)"
+                             CheckedChanged="OnDeploymentChanged" />
+            </HorizontalStackLayout>
+
+            <Entry x:Name="HostEntry" Placeholder="your-id.cloud.red5.net" Keyboard="Url" />
+            <Entry x:Name="LicenseEntry" Placeholder="SDK licence key (not the server key)" />
+            <Entry x:Name="StreamEntry" Placeholder="stream name" Text="sample" />
+        </VerticalStackLayout>
+
+        <!--
+          One view for the whole session. Creating it on demand would mean creating a native
+          renderer mid-layout, which neither SDK expects.
+        -->
+        <red5:Red5VideoView x:Name="VideoView" Grid.Row="1" />
+
+        <HorizontalStackLayout Grid.Row="2" Spacing="8" HorizontalOptions="Center">
+            <Button x:Name="PreviewButton" Text="Preview" Clicked="OnPreviewClicked" />
+            <Button x:Name="PublishButton" Text="Publish" Clicked="OnPublishClicked" />
+            <Button x:Name="SubscribeButton" Text="Subscribe" Clicked="OnSubscribeClicked" />
+            <Button x:Name="SwitchButton" Text="Flip" Clicked="OnSwitchCameraClicked" IsEnabled="False" />
+            <Button x:Name="StopButton" Text="Stop" Clicked="OnStopClicked" IsEnabled="False" />
+        </HorizontalStackLayout>
+
+        <ScrollView Grid.Row="3" x:Name="StatusScroll" HeightRequest="140">
+            <Label x:Name="StatusLabel" FontFamily="OpenSansRegular" FontSize="12" />
+        </ScrollView>
+
+    </Grid>
+
+</ContentPage>

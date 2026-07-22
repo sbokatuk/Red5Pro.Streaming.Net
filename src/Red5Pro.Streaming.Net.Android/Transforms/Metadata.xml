@@ -47,6 +47,29 @@
 
 
   <!--
+    ==========================================================================
+    PubNub chat
+    ==========================================================================
+    PubnubClientListener declares onStatusChanged(com.pubnub.api.models.consumer.PNStatus), and
+    PNStatus comes from com.pubnub:pubnub-gson, which this binding does not reference. The generator
+    happily binds the interface anyway and emits an Implementor for it, which then does not compile
+    in the *consuming app* rather than here:
+
+        PubnubClientListenerImplementor is not abstract and does not override abstract method
+        onStatusChanged(PNStatus) in PubnubClientListener
+
+    That is a nasty failure mode - the binding builds, packs and passes its tests, and only an
+    actual app that dexes the Java discovers it - so the interface is dropped. PubNub-backed chat is
+    not part of the bound surface; the streaming API does not reference it, and the builder takes
+    the PubNub keys as plain strings.
+
+    Binding it properly would mean adding a PubNub Java binding as a dependency of every consumer,
+    for a feature most of them will not use.
+  -->
+  <remove-node path="/api/package[@name='net.red5.android.api']/interface[@name='PubnubClientListener']" />
+  <remove-node path="/api/package[@name='net.red5.android.api']/class[@name='PubnubClientListener']" />
+
+  <!--
     Kept rather than removed, unlike its obfuscated siblings: the public Red5CustomVideoCapturer
     derives from it, so removing it would leave that type with an unbindable base
     ("Class 'Red5CustomVideoCapturer' has unknown base type 'net.red5.android.core.c'"). It is a

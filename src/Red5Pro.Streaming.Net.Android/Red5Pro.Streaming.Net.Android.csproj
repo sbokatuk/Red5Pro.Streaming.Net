@@ -132,7 +132,16 @@
     <!-- Packed once at the package root; the .targets below wires it into the consuming project. -->
     <None Include="Jars/webrtc-android.aar" Pack="true" PackagePath="native/" Visible="false" />
 
-    <None Include="build/Red5Pro.Streaming.Net.Android.targets" Pack="true" PackagePath="build/" Visible="false" />
+
+    <!--
+      buildTransitive, not build. NuGet imports build/ only for a *direct* PackageReference, and
+      these packages are normally reached transitively - an app references
+      Red5Pro.Streaming.Net.Maui, which brings Red5Pro.Streaming.Net, which brings this. Packed
+      under build/ the targets silently never ran, so libwebrtc was absent from the javac classpath
+      and Red5ProAndroidSdk was never honoured; the app failed with "package org.webrtc does not
+      exist" pointing at neither cause. buildTransitive/ applies to direct references too.
+    -->
+    <None Include="build/Red5Pro.Streaming.Net.Android.targets" Pack="true" PackagePath="buildTransitive/" Visible="false" />
   </ItemGroup>
 
 </Project>

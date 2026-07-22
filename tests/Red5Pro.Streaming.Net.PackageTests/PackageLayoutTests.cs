@@ -78,6 +78,9 @@ public class PackageLayoutTests
         }
     }
 
+    // buildTransitive rather than build: these packages are normally reached transitively, and
+    // NuGet imports build/ only for direct references - so targets packed under build/ would
+    // silently never run for the consumers who matter most.
     [SkippableFact]
     public void Ios_package_ships_targets_that_require_the_consumers_sdk()
     {
@@ -85,8 +88,8 @@ public class PackageLayoutTests
 
         using var package = Packages.OpenPackage(Packages.IOS);
 
-        var targets = package.GetEntry($"build/{Packages.IOS}.targets");
-        Assert.True(targets is not null, $"{Packages.IOS} is missing build/{Packages.IOS}.targets.");
+        var targets = package.GetEntry($"buildTransitive/{Packages.IOS}.targets");
+        Assert.True(targets is not null, $"{Packages.IOS} is missing buildTransitive/{Packages.IOS}.targets.");
 
         using var reader = new StreamReader(targets!.Open());
         var content = reader.ReadToEnd();
@@ -104,8 +107,8 @@ public class PackageLayoutTests
 
         using var package = Packages.OpenPackage(Packages.Android);
 
-        var targets = package.GetEntry($"build/{Packages.Android}.targets");
-        Assert.True(targets is not null, $"{Packages.Android} is missing build/{Packages.Android}.targets.");
+        var targets = package.GetEntry($"buildTransitive/{Packages.Android}.targets");
+        Assert.True(targets is not null, $"{Packages.Android} is missing buildTransitive/{Packages.Android}.targets.");
 
         using var reader = new StreamReader(targets!.Open());
         var content = reader.ReadToEnd();
