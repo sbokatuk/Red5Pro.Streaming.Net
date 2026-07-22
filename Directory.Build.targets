@@ -1,0 +1,43 @@
+<Project>
+
+  <!--
+    ============================================================================
+    Keep .aar files out of lib/<tfm>/
+    ============================================================================
+    Applies to every project in the repository, because the problem shows up at two different
+    levels and the fix is identical:
+
+      Red5Pro.Streaming.Net.Android   binds red5-android-sdk.aar and webrtc-android.aar, and .NET
+                                      for Android packs every bound .aar into lib/<tfm>/ by
+                                      default. Pack="false" on the AndroidLibrary item is silently
+                                      ignored.
+
+      Red5Pro.Streaming.Net, .Maui    reference that package, and the transitively restored .aar is
+                                      packed into *their* lib/<tfm>/ too - so libwebrtc appeared
+                                      three more times at 45 MB each, taking the dependency-only
+                                      cross-platform package to 83 MB.
+
+    Two reasons to stop it, one mechanism:
+
+      red5-android-sdk.aar   must not ship at all. The Red5 EULA forbids redistributing it
+                             (3.6, 3.7), and the default behaviour would have published it inside
+                             a public NuGet package.
+      webrtc-android.aar     may ship, and does - but once, from native/ in the Android package,
+                             rather than nine times across four packages.
+
+    The filter hooks _IncludeAarInNuGetPackage, which is the .NET for Android target that adds
+    them; the items arrive as TfmSpecificPackageFileWithRecursiveDir, not TfmSpecificPackageFile.
+    Both of those facts were established by dumping the item groups at pack time - guessing the
+    hook produced a package that looked right and was not.
+
+    Red5Pro.Streaming.Net.PackageTests asserts the outcome on the packed .nupkg, because this is
+    exactly the kind of thing that silently regresses when the Android SDK changes its packing.
+  -->
+  <Target Name="Red5FilterPackagedAars" AfterTargets="_IncludeAarInNuGetPackage">
+    <ItemGroup>
+      <TfmSpecificPackageFileWithRecursiveDir
+          Remove="@(TfmSpecificPackageFileWithRecursiveDir->WithMetadataValue('Extension', '.aar'))" />
+    </ItemGroup>
+  </Target>
+
+</Project>

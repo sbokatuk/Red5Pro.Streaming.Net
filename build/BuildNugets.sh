@@ -1,0 +1,140 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Packs every Red5Pro.Streaming.Net package for net8, net9 and net10.
+#
+# Usage:
+#   ./build/BuildNugets.sh                            # version from Directory.Build.props
+#   ./build/BuildNugets.sh 2.1.0.2-beta.4             # explicit package version
+#   ./build/BuildNugets.sh 2.1.0.2-beta.4 android     # only Red5Pro.Streaming.Net.Android
+#   ./build/BuildNugets.sh 2.1.0.2-beta.4 apple       # only the iOS, core and MAUI packages
+#
+# The scope argument exists for CI, which packs Android on a Linux runner and the Apple packages on
+# a macOS one. It defaults to 'all', minus iOS when not running on macOS.
+#
+# Run the native fetch scripts first - native/android/fetch-android.sh and, on macOS,
+# native/ios/fetch-ios.sh - or the bindings will fail their artifact checks.
+#
+# Packages are written to ./artifacts.
+#
+# Each .NET SDK's workloads support only two target frameworks per platform (the .NET 9 band builds
+# net8/net9, the .NET 10 band builds net10), so this runs two passes and merges them with
+# build/merge-packages.py. global.json pins the .NET 9 SDK, and the SDK is resolved from the
+# working directory, so the second pass runs from a scratch directory carrying its own global.json.
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+. "${SCRIPT_DIR}/pins.sh"
+
+ROOT="${RED5_REPO_ROOT}"
+OUTPUT="${ROOT}/artifacts"
+
+PASS1_BAND="net9"
+PASS2_BAND="net10"
+PASS2_SDK="10.0.100"
+
+VERSION="${1:-}"
+VERSION_ARG=""
+if [ -n "${VERSION}" ]; then
+    # Validated before being interpolated into MSBuild arguments and package file names.
+    case "${VERSION}" in
+        *[!A-Za-z0-9.+_-]*)
+            echo "error: invalid version '${VERSION}'" >&2
+            exit 1
+            ;;
+    esac
+    VERSION_ARG="-p:Version=${VERSION}"
+fi
+
+SCOPE="${2:-all}"
+case "${SCOPE}" in
+    all|android|apple) ;;
+    *)
+        echo "error: scope must be all, android or apple (got '${SCOPE}')" >&2
+        exit 1
+        ;;
+esac
+
+IS_MACOS=false
+[ "$(uname -s)" = "Darwin" ] && IS_MACOS=true
+
+PLATFORM_PROJECTS=()
+PACK_CROSS_PLATFORM=false
+
+if [ "${SCOPE}" = "all" ] || [ "${SCOPE}" = "android" ]; then
+    PLATFORM_PROJECTS+=("${ROOT}/src/Red5Pro.Streaming.Net.Android/Red5Pro.Streaming.Net.Android.csproj")
+fi
+
+if [ "${SCOPE}" = "all" ] || [ "${SCOPE}" = "apple" ]; then
+    if [ "${IS_MACOS}" = true ]; then
+        PLATFORM_PROJECTS+=("${ROOT}/src/Red5Pro.Streaming.Net.iOS/Red5Pro.Streaming.Net.iOS.csproj")
+        PACK_CROSS_PLATFORM=true
+    elif [ "${SCOPE}" = "apple" ]; then
+        echo "::error::scope 'apple' requires macOS with Xcode" >&2
+        exit 1
+    else
+        echo "==> not macOS: skipping the iOS, core and MAUI builds"
+    fi
+fi
+
+# Scratch directories for the two passes, deliberately *outside* artifacts/: NuGet folder sources
+# search subdirectories, so a pass directory under artifacts/ would let the cross-platform restore
+# resolve an unmerged single-target-framework package and fail with NU1202.
+WORK="$(mktemp -d)"
+trap 'rm -rf "${WORK}"' EXIT
+
+PASS1_DIR="${WORK}/net9-pass"
+PASS2_DIR="${WORK}/net10-pass"
+
+SDK10_DIR="${WORK}/sdk10"
+mkdir -p "${SDK10_DIR}"
+cat > "${SDK10_DIR}/global.json" <<EOF
+{ "sdk": { "version": "${PASS2_SDK}", "rollForward": "latestFeature" } }
+EOF
+
+# Packs one project in both SDK bands, then merges the two packages into artifacts/.
+pack_and_merge() {
+    local project="$1" name
+    name="$(basename "${project}" .csproj)"
+
+    echo "==> packing ${name} (${PASS1_BAND} band)"
+    dotnet pack "${project}" \
+        -c Release \
+        -p:Red5SdkBand="${PASS1_BAND}" \
+        ${VERSION_ARG} \
+        -o "${PASS1_DIR}"
+
+    echo "==> packing ${name} (${PASS2_BAND} band)"
+    ( cd "${SDK10_DIR}" && dotnet pack "${project}" \
+        -c Release \
+        -p:Red5SdkBand="${PASS2_BAND}" \
+        ${VERSION_ARG} \
+        -o "${PASS2_DIR}" )
+
+    echo "==> merging ${name}"
+    python3 "${SCRIPT_DIR}/merge-packages.py" "${PASS1_DIR}" "${PASS2_DIR}" "${OUTPUT}"
+
+    rm -rf "${PASS1_DIR}" "${PASS2_DIR}"
+}
+
+for project in "${PLATFORM_PROJECTS[@]}"; do
+    pack_and_merge "${project}"
+done
+
+if [ "${PACK_CROSS_PLATFORM}" = true ]; then
+    # Order matters, and each step depends on the previous one's output being in artifacts/:
+    #
+    #   Red5Pro.Streaming.Net       pinned dependency on both platform bindings
+    #   Red5Pro.Streaming.Net.Maui  pinned dependency on Red5Pro.Streaming.Net
+    #
+    # They are PackageReferences rather than ProjectReferences so the packed dependency graph is
+    # exactly what a consumer restores - which means each has to be packed before the next one can
+    # restore. NuGet would otherwise resolve a stale copy, or the last published release.
+    #
+    # With scope 'apple' the Android package must be placed in artifacts/ by the caller; CI
+    # downloads it from the pack-android job.
+    pack_and_merge "${ROOT}/src/Red5Pro.Streaming.Net/Red5Pro.Streaming.Net.csproj"
+    pack_and_merge "${ROOT}/src/Red5Pro.Streaming.Net.Maui/Red5Pro.Streaming.Net.Maui.csproj"
+fi
+
+echo "==> packages in ${OUTPUT}:"
+ls -1 "${OUTPUT}"/*.nupkg

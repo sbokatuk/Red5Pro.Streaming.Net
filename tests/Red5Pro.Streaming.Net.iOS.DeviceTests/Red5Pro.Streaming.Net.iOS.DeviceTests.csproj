@@ -1,0 +1,68 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    On-device smoke test for the packed Red5Pro.Streaming.Net.iOS package. A plain .NET for iOS
+    app, not a MAUI one, so a failure points at the binding rather than at MAUI startup.
+
+    Driven by .github/scripts/run-ios-device-tests.sh, which builds it for a simulator runtime
+    identifier, installs it with simctl and reads the verdict from the app's stdout.
+  -->
+  <PropertyGroup>
+    <!-- Set by the runner script; the default is the newest band so a bare build is meaningful. -->
+    <Red5DeviceTargetFramework Condition=" '$(Red5DeviceTargetFramework)' == '' ">net9.0-ios18.0</Red5DeviceTargetFramework>
+    <TargetFramework>$(Red5DeviceTargetFramework)</TargetFramework>
+
+    <OutputType>Exe</OutputType>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+
+    <!--
+      CS8765: UIApplicationDelegate.FinishedLaunching's launchOptions parameter is annotated
+      differently across the iOS SDK bands this app is built for, so the override warns on some.
+    -->
+    <NoWarn>$(NoWarn);CS8765</NoWarn>
+
+    <ApplicationId>net.red5.streaming.devicetests</ApplicationId>
+    <ApplicationVersion>1</ApplicationVersion>
+    <ApplicationDisplayVersion>1.0</ApplicationDisplayVersion>
+    <SupportedOSPlatformVersion>$(Red5IosMinVersion)</SupportedOSPlatformVersion>
+
+    <!--
+      Trimming is the interesting variable here, so it is a switch rather than a fixed setting.
+      Default off: the app's job is to prove the *packaged* binding works, and a type stripped
+      because the test code never statically reaches it would be a false failure.
+
+        none  what a Debug build does, and the default here
+        sdk   what a consumer's Release build does by default: the BCL is trimmed, not the binding
+        full  the aggressive case, where the linker may strip binding members nothing calls
+
+      iOS rejects PublishTrimmed=false outright; MtouchLink is how it spells the same intent.
+    -->
+    <Red5Trimming Condition=" '$(Red5Trimming)' == '' ">none</Red5Trimming>
+    <MtouchLink Condition=" '$(Red5Trimming)' == 'none' ">None</MtouchLink>
+    <MtouchLink Condition=" '$(Red5Trimming)' == 'sdk' ">SdkOnly</MtouchLink>
+    <MtouchLink Condition=" '$(Red5Trimming)' == 'full' ">Full</MtouchLink>
+
+    <!-- Simulator builds are never signed; the runner installs the .app with simctl. -->
+    <CodesignKey Condition=" $(RuntimeIdentifier.StartsWith('iossimulator')) "></CodesignKey>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      The packed .nupkg from artifacts/ (exposed by NuGet.config), never the binding project: the
+      e2e has to run against exactly what would be published.
+
+      Exact version, in brackets. A bare version is a *minimum* to NuGet, so a missing local build
+      is silently satisfied from nuget.org and the smoke test then passes against the last released
+      package instead of the one under test.
+    -->
+    <PackageReference Include="Red5Pro.Streaming.Net.iOS" Version="[$(Red5PackageVersion)]" />
+  </ItemGroup>
+
+  <Target Name="ValidateRed5PackageVersion" BeforeTargets="Restore;Build"
+          Condition=" '$(Red5PackageVersion)' == '' ">
+    <Error Text="Red5PackageVersion must be set, e.g. -p:Red5PackageVersion=2.1.0.2-local.4. Run build/BuildNugets.sh first." />
+  </Target>
+
+</Project>

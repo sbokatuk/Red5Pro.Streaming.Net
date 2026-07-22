@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Imported automatically by any project that references the Red5Pro.Streaming.Net.iOS package
+  (NuGet imports build/<package-id>.targets).
+
+  Why the package needs this:
+
+  Our own two frameworks - Red5ProFacade and WebRTC - travel in the binding's sidecar
+  <assembly>.resources.zip, which .NET for iOS extracts and links during the consuming app's build.
+  Nothing extra is needed for those.
+
+  Red5WebRTCKit is different: it is not in this package at all, because the Red5 EULA does not
+  permit redistributing it (sections 3.6 and 3.7). Our facade carries undefined references to its
+  symbols, so the consuming app must link the consumer's own licensed copy - which is what the
+  NativeReference below does, and what the check further down explains when it is missing.
+-->
+<Project>
+
+  <PropertyGroup Condition=" '$(TargetPlatformIdentifier)' == 'ios' ">
+    <!--
+      Lets a consumer who genuinely wants to build without the SDK - to inspect the API surface, or
+      to compile a library that only references the types - do so knowingly. The app will not link.
+    -->
+    <Red5ProSkipSdkCheck Condition=" '$(Red5ProSkipSdkCheck)' == '' ">false</Red5ProSkipSdkCheck>
+  </PropertyGroup>
+
+  <ItemGroup Condition=" '$(TargetPlatformIdentifier)' == 'ios' ">
+    <!--
+      The consumer's own Red5WebRTCKit.xcframework. Our facade carries undefined references to its
+      symbols, so without this the app fails at link time rather than at runtime - which is the
+      better of the two failures, and why the check below spells out what to do.
+    -->
+    <NativeReference Condition=" '$(Red5ProIosSdk)' != '' "
+                     Include="$(Red5ProIosSdk)">
+      <Kind>Framework</Kind>
+      <Visible>false</Visible>
+    </NativeReference>
+  </ItemGroup>
+
+  <!--
+    Only applications are checked - see the Android targets for why. On iOS the distinction also
+    matters because the link step, which is where a missing framework actually fails, only runs
+    for an app.
+  -->
+  <Target Name="ValidateRed5ProIosSdk"
+          BeforeTargets="Build"
+          Condition=" '$(TargetPlatformIdentifier)' == 'ios'
+                      and '$(OutputType)' == 'Exe'
+                      and '$(Red5ProSkipSdkCheck)' != 'true' ">
+
+    <Error Condition=" '$(Red5ProIosSdk)' == '' "
+           Code="RED5101"
+           Text="Red5ProIosSdk is not set.%0A%0AThis package binds the Red5 Pro WebRTC iOS SDK but does not redistribute it - the Red5 EULA does not permit that - so you must supply your own licensed copy.%0A%0A  1. Download Red5WebRTCKit-$(Red5Version)-release.*.zip and unpack it%0A       Red5 Cloud: https://red5-cloud-sdk.cachefly.net/%0A       Red5 Pro:   https://account.red5.net/downloads%0A  2. Point this property at the .xcframework, for example in your .csproj:%0A       &lt;PropertyGroup&gt;&lt;Red5ProIosSdk&gt;$(MSBuildProjectDirectory)/native/Red5WebRTCKit.xcframework&lt;/Red5ProIosSdk&gt;&lt;/PropertyGroup&gt;%0A%0ANote that the build published on the GitHub release (b11) is a *static* library, while the one served by the links above (b12) is the dynamic framework this binding expects.%0A%0ASet Red5ProSkipSdkCheck=true to build without it (the app will not link)." />
+
+    <Error Condition=" '$(Red5ProIosSdk)' != '' and !Exists('$(Red5ProIosSdk)') "
+           Code="RED5102"
+           Text="Red5ProIosSdk points at '$(Red5ProIosSdk)', which does not exist." />
+  </Target>
+
+</Project>

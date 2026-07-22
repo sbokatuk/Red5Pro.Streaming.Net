@@ -1,0 +1,138 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      Set per SDK band in Directory.Build.props: the .NET 9 band builds net8+net9 and the .NET 10
+      band builds net10, so build/BuildNugets.sh packs twice and merges the results.
+    -->
+    <TargetFrameworks>$(Red5AndroidTargetFrameworks)</TargetFrameworks>
+    <SupportedOSPlatformVersion>$(Red5AndroidMinSdk)</SupportedOSPlatformVersion>
+
+    <AssemblyName>Red5Pro.Streaming.Net.Android</AssemblyName>
+    <RootNamespace>Red5Pro.Streaming.Net.Android</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+
+    <AndroidClassParser>class-parse</AndroidClassParser>
+    <AndroidCodegenTarget>XAJavaInterop1</AndroidCodegenTarget>
+
+    <!--
+      All of these come from generated binding code rather than from anything written here.
+
+        CS1591          the generated binding carries no XML doc comments
+        CS0108/CS0114   Java's org.webrtc hierarchy redeclares members the generator cannot
+                        express as overrides, so the C# it emits hides them
+        BG8401          members skipped because their managed name collides with another; the
+                        collisions that actually matter are fixed in Transforms/Metadata.xml
+
+      BG8605/BG8606 (unresolved Java types) and BG8801 (invalid parameter type) stay visible: they
+      say something was left out of the binding, which is worth noticing.
+    -->
+    <NoWarn>$(NoWarn);CS1591;CS0108;CS0114;BG8401</NoWarn>
+  </PropertyGroup>
+
+  <Target Name="ValidateRed5SdkBand" BeforeTargets="Build;Pack"
+          Condition=" '$(TargetFrameworks)' == '' ">
+    <Error Text="Red5SdkBand must be 'net9' or 'net10', but was '$(Red5SdkBand)'." />
+  </Target>
+
+  <Target Name="ValidateRed5NativeArtifacts" BeforeTargets="Build;Pack">
+    <Error Condition="!Exists('$(MSBuildProjectDirectory)/Jars/red5-android-sdk.aar')"
+           Text="Jars/red5-android-sdk.aar is missing. Run native/android/fetch-android.sh first." />
+    <Error Condition="!Exists('$(MSBuildProjectDirectory)/Jars/webrtc-android.aar')"
+           Text="Jars/webrtc-android.aar is missing. Run native/android/fetch-android.sh first." />
+  </Target>
+
+  <ItemGroup>
+    <!--
+      The Red5 SDK. Bound so the generator can see its API, but Pack="false" because it must not
+      leave this machine: the Red5 EULA forbids redistributing it (3.6, 3.7). The package ships
+      the generated binding assembly only, and build/Red5Pro.Streaming.Net.Android.targets makes
+      the consumer supply their own licensed copy.
+
+      Red5ProPackageTests asserts the absence, because this is the one mistake here that would be
+      a licensing problem rather than a bug.
+    -->
+    <AndroidLibrary Include="Jars/red5-android-sdk.aar" Bind="true" Pack="false" />
+
+    <!--
+      libwebrtc. The Red5 .aar carries no jniLibs at all, so every org.webrtc type and every
+      native .so comes from here. BSD-licensed and freely redistributable, so unlike the above it
+      does ship - but packed once at the package root rather than per target framework, because it
+      is 47 MB and identical for all three.
+    -->
+    <AndroidLibrary Include="Jars/webrtc-android.aar" Bind="true" Pack="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <TransformFile Include="Transforms/Metadata.xml" />
+  </ItemGroup>
+
+  <!-- The .aar packing filter lives in Directory.Build.targets; it is needed by three projects. -->
+
+
+  <!--
+    Declared by the Red5 SDK's own integration instructions as `implementation` dependencies, which
+    means they are *not* inside the .aar. Without them a consumer restores, builds and installs
+    perfectly happily, then dies the first time it publishes with
+
+        Java.Lang.NoClassDefFoundError: Failed resolution of: Lcom/google/gson/GsonBuilder;
+
+    Nothing short of an on-device publish catches this, which is what the live e2e is for.
+
+    The Xamarin.Google / Xamarin.Square bindings are themselves packed per SDK band, so no single
+    version serves all three of our target frameworks. The split below is not arbitrary:
+
+      net8 + net10   GoogleGson 2.13.2, Square.OkHttp3 5.1.0.2 - the versions Red5's own testbed
+                     declares, and the newest that still carry a net8.0-android34.0 asset
+      net9           the same libraries, but the only builds carrying a net9.0-android35.0 asset
+                     are later ones, so net9 tracks those instead
+
+    So the majority of consumers get exactly the versions Red5 tested against, and only the net9
+    leg drifts - by a patch release of the *binding*, not of gson or okhttp themselves.
+  -->
+  <ItemGroup Condition=" '$(TargetFramework)' == 'net9.0-android35.0' ">
+    <PackageReference Include="GoogleGson" Version="2.13.2.2" />
+    <PackageReference Include="Square.OkHttp3" Version="5.3.2.2" />
+  </ItemGroup>
+
+  <ItemGroup Condition=" '$(TargetFramework)' != 'net9.0-android35.0' ">
+    <PackageReference Include="GoogleGson" Version="2.13.2" />
+    <PackageReference Include="Square.OkHttp3" Version="5.1.0.2" />
+  </ItemGroup>
+
+  <!--
+    The Java package maps to Net.Red5.Android by default. Renamed so the namespace reads like the
+    package a consumer installed, sub-namespaces following along (…​.Api -> Red5Pro.Streaming.Api).
+
+    Org.Webrtc is deliberately left alone: it is the name the WebRTC project uses everywhere, so
+    anyone who has seen WebRTC code before will look for it, and every Android WebRTC sample on
+    the internet spells it that way.
+
+    This changes the public API, so it has to stay put once the packages have users.
+  -->
+  <ItemGroup>
+    <AndroidNamespaceReplacement Include="Net.Red5.Android" Replacement="Red5Pro.Streaming" />
+  </ItemGroup>
+
+  <!-- Packaging -->
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackageId>Red5Pro.Streaming.Net.Android</PackageId>
+    <Title>.NET for Android bindings for the Red5 Pro WebRTC SDK.</Title>
+    <Description>.NET for Android / .NET MAUI bindings for the Red5 Pro WebRTC Android SDK $(Red5Version), for publishing and subscribing to low-latency WebRTC streams through Red5 Pro or Red5 Cloud. The Red5 SDK itself is not redistributed: supply your own licensed .aar via the Red5ProAndroidSdk property. libwebrtc is bundled.</Description>
+    <PackageTags>Red5;Red5Pro;Red5Cloud;WebRTC;streaming;WHIP;WHEP;SDK;MAUI;Android;dotnet-android;Binding</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="../../assets/icon.png" Pack="true" PackagePath="/" Visible="false" />
+    <None Include="../../README.md" Pack="true" PackagePath="/" Visible="false" />
+
+    <!-- Packed once at the package root; the .targets below wires it into the consuming project. -->
+    <None Include="Jars/webrtc-android.aar" Pack="true" PackagePath="native/" Visible="false" />
+
+    <None Include="build/Red5Pro.Streaming.Net.Android.targets" Pack="true" PackagePath="build/" Visible="false" />
+  </ItemGroup>
+
+</Project>

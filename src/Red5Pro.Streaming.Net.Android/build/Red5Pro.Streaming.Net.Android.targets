@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Imported automatically by any project that references the Red5Pro.Streaming.Net.Android package
+  (NuGet imports build/<package-id>.targets).
+
+  It does two things the package cannot do for itself:
+
+  1. Adds the bundled libwebrtc .aar to the consuming project. It is packed once at the package
+     root rather than under lib/<tfm>/, because it is 47 MB and identical for all three target
+     frameworks, and an item declared here is how it reaches the app's dex and jniLibs.
+
+  2. Requires the consumer to supply their own Red5 SDK .aar. The Red5 EULA forbids us from
+     shipping it (sections 3.6 and 3.7), so the binding assembly in this package describes an API
+     whose Java classes are not present until the consumer adds them.
+-->
+<Project>
+
+  <PropertyGroup Condition=" '$(TargetPlatformIdentifier)' == 'android' ">
+    <!--
+      Lets a consumer who genuinely wants to build without the SDK - to inspect the API surface,
+      or to compile a library that only references the types - do so knowingly.
+      The app will not run.
+    -->
+    <Red5ProSkipSdkCheck Condition=" '$(Red5ProSkipSdkCheck)' == '' ">false</Red5ProSkipSdkCheck>
+  </PropertyGroup>
+
+  <ItemGroup Condition=" '$(TargetPlatformIdentifier)' == 'android' ">
+    <!--
+      Bind="false": the C# for these types is already in the binding assembly this package ships.
+      Binding again here would generate a second copy in the app and fail with duplicate types.
+    -->
+    <AndroidLibrary Include="$(MSBuildThisFileDirectory)../native/webrtc-android.aar"
+                    Bind="false"
+                    Visible="false" />
+
+    <AndroidLibrary Condition=" '$(Red5ProAndroidSdk)' != '' "
+                    Include="$(Red5ProAndroidSdk)"
+                    Bind="false"
+                    Visible="false" />
+  </ItemGroup>
+
+  <!--
+    Only applications are checked. A class library that merely compiles against the bound API does
+    not need the SDK present - it is the app that has to dex the Java classes and load the native
+    libraries - and failing the library build would force every intermediate package in a chain to
+    carry a licensed .aar it never uses.
+  -->
+  <Target Name="ValidateRed5ProAndroidSdk"
+          BeforeTargets="Build"
+          Condition=" '$(TargetPlatformIdentifier)' == 'android'
+                      and '$(AndroidApplication)' == 'true'
+                      and '$(Red5ProSkipSdkCheck)' != 'true' ">
+
+    <Error Condition=" '$(Red5ProAndroidSdk)' == '' "
+           Code="RED5001"
+           Text="Red5ProAndroidSdk is not set.%0A%0AThis package binds the Red5 Pro WebRTC Android SDK but does not redistribute it - the Red5 EULA does not permit that - so you must supply your own licensed copy.%0A%0A  1. Download red5-android-sdk-$(Red5Version)-release.*.aar%0A       Red5 Cloud: https://red5-cloud-sdk.cachefly.net/%0A       Red5 Pro:   https://account.red5.net/downloads%0A  2. Point this property at it, for example in your .csproj:%0A       &lt;PropertyGroup&gt;&lt;Red5ProAndroidSdk&gt;$(MSBuildProjectDirectory)/libs/red5-android-sdk.aar&lt;/Red5ProAndroidSdk&gt;&lt;/PropertyGroup&gt;%0A%0ASet Red5ProSkipSdkCheck=true to build without it (the app will not run)." />
+
+    <Error Condition=" '$(Red5ProAndroidSdk)' != '' and !Exists('$(Red5ProAndroidSdk)') "
+           Code="RED5002"
+           Text="Red5ProAndroidSdk points at '$(Red5ProAndroidSdk)', which does not exist." />
+  </Target>
+
+</Project>

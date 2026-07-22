@@ -1,0 +1,61 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The cross-platform API: one client over two bindings that look nothing like each other.
+
+    Deliberately no MAUI dependency, so plain .NET for Android and .NET for iOS apps can use this.
+    The MAUI view and the Android Activity plumbing live in Red5Pro.Streaming.Net.Maui.
+
+    Both platforms' target frameworks are listed together, which is why this can only be packed on
+    macOS - restoring the iOS legs needs the iOS workload. See build/BuildNugets.sh.
+  -->
+  <PropertyGroup>
+    <TargetFrameworks>$(Red5AndroidTargetFrameworks);$(Red5IosTargetFrameworks)</TargetFrameworks>
+
+    <AssemblyName>Red5Pro.Streaming.Net</AssemblyName>
+    <RootNamespace>Red5Pro.Streaming.Net</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+
+    <SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">$(Red5AndroidMinSdk)</SupportedOSPlatformVersion>
+    <SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios'">$(Red5IosMinVersion)</SupportedOSPlatformVersion>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <Red5DependencyVersion Condition=" '$(Red5DependencyVersion)' == '' ">$(Version)</Red5DependencyVersion>
+  </PropertyGroup>
+
+  <!--
+    Platform code is picked per target framework rather than by the default glob, which would try
+    to compile the Android half into the iOS assembly.
+  -->
+  <ItemGroup>
+    <Compile Remove="Platforms/**/*.cs" />
+  </ItemGroup>
+
+  <ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">
+    <Compile Include="Platforms/Android/**/*.cs" />
+    <PackageReference Include="Red5Pro.Streaming.Net.Android" Version="[$(Red5DependencyVersion)]" />
+  </ItemGroup>
+
+  <ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios'">
+    <Compile Include="Platforms/iOS/**/*.cs" />
+    <PackageReference Include="Red5Pro.Streaming.Net.iOS" Version="[$(Red5DependencyVersion)]" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackageId>Red5Pro.Streaming.Net</PackageId>
+    <Title>Cross-platform .NET client for the Red5 Pro WebRTC SDKs.</Title>
+    <Description>One API over the Red5 Pro WebRTC SDKs for Android and iOS: publish and subscribe to low-latency WebRTC streams with awaitable calls and ordinary .NET events, against either Red5 Cloud or a standalone Red5 Pro server. Pulls in the platform binding that matches whichever target framework you build. For .NET MAUI apps, add Red5Pro.Streaming.Net.Maui for the video view. The Red5 SDK itself is not redistributed - supply your own licensed copy.</Description>
+    <PackageTags>Red5;Red5Pro;Red5Cloud;WebRTC;streaming;WHIP;WHEP;SDK;MAUI;Android;iOS;Binding</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="../../assets/icon.png" Pack="true" PackagePath="/" Visible="false" />
+    <None Include="../../README.md" Pack="true" PackagePath="/" Visible="false" />
+  </ItemGroup>
+
+</Project>
