@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Fixes applied to the Java API before the C# binding is generated.
+  See https://learn.microsoft.com/dotnet/android/binding-libs/customizing-bindings/java-bindings-metadata
+
+  Note that the XPath subset the binding generator supports is small: predicates like
+  string-length(@name) silently match nothing. Everything below therefore uses plain @name
+  equality, which is why the obfuscated types are enumerated rather than matched by pattern.
+-->
+<metadata>
+
+  <!--
+    ==========================================================================
+    Proguarded internals
+    ==========================================================================
+    The Red5 SDK ships obfuscated, so alongside its real API the bytecode carries public classes
+    with single-letter names: a whole package `a`, a dozen types in net.red5.android.core, and
+    seventeen nested inside Red5WebrtcClient.
+
+    They are implementation detail that merely happens to be public. Binding them adds meaningless
+    types to our public API, and the nested ones do not even compile - the generator reports
+    "Could not find top ancestor type 'b' for nested type ..." because it cannot map an obfuscated
+    outer/inner pair onto C#.
+
+    Removing them also fixes an unrelated-looking error: the only member in the whole SDK that
+    references com.pubnub.* lives on net.red5.android.core.f, so dropping f is what silences
+    "The Java type 'com.pubnub.api.java.PubNub' could not be found". PubNub-backed chat is not part
+    of the bound surface.
+  -->
+  <remove-node path="/api/package[@name='a']/class[@name='a']" />
+
+  <remove-node path="/api/package[@name='net.red5.android.core']/class[@name='a']" />
+  <remove-node path="/api/package[@name='net.red5.android.core']/class[@name='b']" />
+  <remove-node path="/api/package[@name='net.red5.android.core']/class[@name='b.a']" />
+  <remove-node path="/api/package[@name='net.red5.android.core']/class[@name='b.b']" />
+  <remove-node path="/api/package[@name='net.red5.android.core']/class[@name='b.c']" />
+  <remove-node path="/api/package[@name='net.red5.android.core']/class[@name='b.d']" />
+  <remove-node path="/api/package[@name='net.red5.android.core']/interface[@name='b.e']" />
+  <remove-node path="/api/package[@name='net.red5.android.core']/class[@name='b.f']" />
+  <remove-node path="/api/package[@name='net.red5.android.core']/class[@name='b.g']" />
+  <remove-node path="/api/package[@name='net.red5.android.core']/class[@name='c.a']" />
+  <remove-node path="/api/package[@name='net.red5.android.core']/class[@name='d']" />
+  <remove-node path="/api/package[@name='net.red5.android.core']/class[@name='e']" />
+  <remove-node path="/api/package[@name='net.red5.android.core']/class[@name='e.a']" />
+  <remove-node path="/api/package[@name='net.red5.android.core']/class[@name='f']" />
+  <remove-node path="/api/package[@name='net.red5.android.core']/class[@name='g']" />
+
+
+  <!--
+    Kept rather than removed, unlike its obfuscated siblings: the public Red5CustomVideoCapturer
+    derives from it, so removing it would leave that type with an unbindable base
+    ("Class 'Red5CustomVideoCapturer' has unknown base type 'net.red5.android.core.c'"). It is a
+    real type - public, implementing org.webrtc.VideoCapturer - that merely lost its name to
+    proguard, so it gets a descriptive one instead.
+  -->
+  <attr path="/api/package[@name='net.red5.android.core']/class[@name='c']"
+        name="managedName">Red5VideoCapturerBase</attr>
+
+  <!--
+    ==========================================================================
+    Overload collisions
+    ==========================================================================
+    onDataChannelMessage is overloaded on byte[] and String. The generator names the Implementor's
+    handler field and the corresponding event after the *method*, so both overloads produce
+    OnDataChannelMessageHandler / DataChannelMessage and the binding does not compile (CS0102).
+    eventName does not help - it renames the event, not the handler field - so the managed name of
+    the binary overload is what has to change. The JNI signature is unaffected, so dispatch still
+    reaches the right Java method.
+
+    Only the interface needs it: Red5WebrtcClient inherits the member rather than redeclaring it.
+  -->
+  <attr path="/api/package[@name='net.red5.android.api']/interface[@name='IRed5WebrtcClient.DataChannelListener']/method[@name='onDataChannelMessage' and parameter[1][@type='byte[]']]"
+        name="managedName">OnDataChannelBinaryMessage</attr>
+
+  <!--
+    ==========================================================================
+    org.webrtc
+    ==========================================================================
+    Getters the generator would otherwise turn into properties whose names collide with an
+    inherited member. Blanking propertyName keeps them as plain methods.
+  -->
+  <!--
+    CS0542: 'Value': member names cannot be the same as their enclosing type. StatsReport.Value is
+    a nested type whose default managed name collides with the Value *property* generated from the
+    enclosing class.
+  -->
+  <attr path="/api/package[@name='org.webrtc']/class[@name='StatsReport.Value']"
+        name="managedName">StatsReportValue</attr>
+
+  <!--
+    JavaAudioDeviceModule exposes two fields typed as WebRtcAudioRecord / WebRtcAudioTrack, which
+    are package-private in Java and so are never bound. The generator still emits properties for
+    the fields, referencing types that do not exist:
+
+        error CS0234: The type or namespace name 'WebRtcAudioRecord' does not exist in the
+                      namespace 'Org.Webrtc.Audio'
+
+    They are internal plumbing - the supported way in is JavaAudioDeviceModule.Builder - so the
+    fields are dropped rather than the package-private classes being forced public.
+  -->
+  <remove-node path="/api/package[@name='org.webrtc.audio']/class[@name='JavaAudioDeviceModule']/field[@name='audioInput']" />
+  <remove-node path="/api/package[@name='org.webrtc.audio']/class[@name='JavaAudioDeviceModule']/field[@name='audioOutput']" />
+
+  <attr path="/api/package[@name='org.webrtc']/class[@name='WrappedNativeVideoEncoder']/method[@name='getScalingSettings' and count(parameter)=0]"
+        name="propertyName"></attr>
+  <attr path="/api/package[@name='org.webrtc']/class[@name='TextureBufferImpl']/method[@name='getType' and count(parameter)=0]"
+        name="propertyName"></attr>
+
+</metadata>

@@ -1,0 +1,161 @@
+<Project>
+
+  <!--
+    ============================================================================
+    Native SDK pins
+    ============================================================================
+    Everything the build consumes from Red5 is pinned here. CI caches the fetched native artifacts
+    keyed on these values, so changing one is what triggers a re-fetch.
+
+    Unlike a source-built binding, both pins are *binaries*: Red5 publishes no source for either
+    SDK. The sha256 of each is recorded so a silently re-uploaded artifact fails the build rather
+    than changing what gets bound.
+  -->
+  <PropertyGroup>
+    <!--
+      Package version base, tracking the Red5 WebRTC SDK line. Android and iOS ship the same
+      version number on the same day, which is why - unlike the Ant Media bindings - there is no
+      argument about which side the package version follows.
+
+      Note the SDK is young and moving fast: 1.0.0 (2026-01-29), 2.0.0.3 (2026-02-04),
+      2.1.0.2 (2026-04-23). Treat the API as not yet settled.
+    -->
+    <Red5Version>2.1.0.2</Red5Version>
+    <VersionPrefix>$(Red5Version)</VersionPrefix>
+
+    <!--
+      The Android SDK, distributed as a single .aar from Red5's CDN. Publicly reachable with no
+      account, which is what lets CI fetch it; the *licence key* is what gates runtime, not the
+      download.
+
+      Deliberately cachefly.net and not red5.net: every red5.net URL answers 403 to a scripted
+      client (curl, CI), so anything pointed at the documentation host cannot be automated.
+
+      The build suffix is part of the file name and is not derivable from the version, so it is
+      pinned separately rather than composed.
+    -->
+    <Red5AndroidBuild>release.b112.red5cloud</Red5AndroidBuild>
+    <Red5AndroidAarUrl>https://red5-cloud-sdk.cachefly.net/red5-android-sdk-$(Red5Version)-$(Red5AndroidBuild).aar</Red5AndroidAarUrl>
+    <Red5AndroidAarSha256>ea7d691f7232b28da310177f0ae6a24d8cdd21d1d3eb5a5f5e3a30f31f35eea2</Red5AndroidAarSha256>
+
+    <!--
+      The iOS SDK, taken from the CDN rather than the GitHub release.
+
+      There are two builds of 2.1.0.2 in circulation and they are not interchangeable:
+
+        b11   attached to the GitHub release. A *static* library (`ar archive`).
+        b12   on this CDN, and what a Red5 Pro account's Downloads page actually serves. A
+              *dynamic* framework (Mach-O shared library).
+
+      b12 is the one to bind. It is what paying customers receive, what Package.swift references
+      and what the podspec describes (`vendored_frameworks`, commented "dynamic framework"). The
+      b11 asset on the GitHub release appears to be a mistake - and note that Package.swift's own
+      binaryTarget url, which names b12 under the *releases* host, returns 404, so SPM resolution
+      against that manifest fails outright.
+
+      Verified equivalent apart from packaging: the two builds' .swiftinterface files differ only
+      in compiler-version cosmetics (Swift 6.0.3 vs 6.3.1 emitting @Combine.Published with or
+      without an explicit generic argument). No API difference.
+    -->
+    <Red5IosBuild>release.b12.red5cloud</Red5IosBuild>
+    <Red5IosXcframeworkUrl>https://red5-cloud-sdk.cachefly.net/Red5WebRTCKit-$(Red5Version)-$(Red5IosBuild).zip</Red5IosXcframeworkUrl>
+    <Red5IosXcframeworkSha256>e9d82e34faa59ad4b4386f87c90f0f1c695f4c86c6df7bfc3b0f7e70581b4872</Red5IosXcframeworkSha256>
+
+    <!--
+      libwebrtc, which both Red5 SDKs link against and neither ships.
+
+      The Android .aar is 578 KB and carries no jniLibs at all - 127 KB of classes and some
+      drawables - so every org.webrtc type and every native .so comes from here. Getting this
+      version wrong produces a binding that generates, packs and installs, then dies on the first
+      call with UnsatisfiedLinkError.
+
+      BSD-licensed and freely redistributable, so unlike the Red5 SDKs these *are* shipped inside
+      our packages. That asymmetry is the whole reason the packaging is split the way it is.
+    -->
+    <WebRtcAndroidVersion>137.7151.03</WebRtcAndroidVersion>
+    <WebRtcIosRepository>https://github.com/stasel/WebRTC</WebRtcIosRepository>
+    <WebRtcIosVersion>140.0.0</WebRtcIosVersion>
+  </PropertyGroup>
+
+  <!--
+    ============================================================================
+    Target frameworks
+    ============================================================================
+    No single .NET SDK can build net8, net9 and net10 for a given platform: each SDK's workload
+    carries only the current band and the previous one.
+
+                  SDK 9 band                          SDK 10 band
+      Android     net8.0-android34.0, net9.0-*35.0    net10.0-android36.0
+      iOS         net8.0-ios18.0,     net9.0-ios18.0  net10.0-ios26.0
+
+    So each binding is packed twice and the results are merged - see build/BuildNugets.sh and
+    build/merge-packages.py. Red5SdkBand selects which pass a given build is.
+
+    The platform version is pinned per TFM deliberately. Bare 'net8.0-android' resolves to
+    android21.0, which silently produces an empty binding assembly with no .aar payload.
+  -->
+  <PropertyGroup>
+    <Red5SdkBand Condition=" '$(Red5SdkBand)' == '' ">net9</Red5SdkBand>
+
+    <Red5AndroidTargetFrameworks Condition=" '$(Red5SdkBand)' == 'net9' ">net8.0-android34.0;net9.0-android35.0</Red5AndroidTargetFrameworks>
+    <Red5AndroidTargetFrameworks Condition=" '$(Red5SdkBand)' == 'net10' ">net10.0-android36.0</Red5AndroidTargetFrameworks>
+
+    <Red5IosTargetFrameworks Condition=" '$(Red5SdkBand)' == 'net9' ">net8.0-ios18.0;net9.0-ios18.0</Red5IosTargetFrameworks>
+    <Red5IosTargetFrameworks Condition=" '$(Red5SdkBand)' == 'net10' ">net10.0-ios26.0</Red5IosTargetFrameworks>
+  </PropertyGroup>
+
+  <!--
+    ============================================================================
+    Minimum platform versions
+    ============================================================================
+    Android 26 is the SDK's own floor, read out of the .aar's AndroidManifest.xml
+    (<uses-sdk android:minSdkVersion="26" />) rather than copied from Red5's testbed.
+
+    iOS 16.0 comes from the shipped binary, and settles a contradiction in Red5's own materials:
+    Package.swift and the podspec both declare 15.0, QUICK_START.md says 15.0, the SDK README says
+    13.0, and the documentation site says 16.0. The framework's .swiftinterface is built with
+    `-target arm64-apple-ios16.0`, so 16.0 is what the code actually requires - the lower numbers
+    would produce a binding that links happily and then fails to load the framework on device.
+  -->
+  <PropertyGroup>
+    <Red5AndroidMinSdk>26</Red5AndroidMinSdk>
+    <Red5IosMinVersion>16.0</Red5IosMinVersion>
+  </PropertyGroup>
+
+  <!--
+    ============================================================================
+    Shared package metadata
+    ============================================================================
+  -->
+  <PropertyGroup>
+    <Authors>s.bokatuk</Authors>
+    <Company>s.bokatuk</Company>
+    <Copyright>Copyright © s.bokatuk</Copyright>
+    <PackageProjectUrl>https://github.com/sbokatuk/Red5Pro.Streaming.Net</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/sbokatuk/Red5Pro.Streaming.Net</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <!--
+      The binding and client code in this repository is MIT. The Red5 SDKs are *not* redistributed
+      by these packages - see the BYO-SDK note in README.md - so this expression describes only
+      what is actually in the box.
+    -->
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
+    <PackageIcon>icon.png</PackageIcon>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <ContinuousIntegrationBuild Condition=" '$(GITHUB_ACTIONS)' == 'true' ">true</ContinuousIntegrationBuild>
+
+    <!--
+      net8.0-* and net9.0-* are past end of support, which the SDK reports as an error. They ship
+      deliberately: .NET 8 is still where a large share of MAUI apps are.
+    -->
+    <CheckEolTargetFramework>false</CheckEolTargetFramework>
+    <CheckEolWorkloads>false</CheckEolWorkloads>
+  </PropertyGroup>
+
+</Project>
