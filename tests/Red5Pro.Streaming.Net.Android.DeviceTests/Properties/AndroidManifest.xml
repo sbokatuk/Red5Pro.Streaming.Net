@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+	<application android:label="Red5 device tests" android:allowBackup="false" />
+	<uses-permission android:name="android.permission.INTERNET" />
+	<uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+	<!--
+	  Granted by the runner script with `pm grant` rather than prompted for: there is nobody to tap
+	  a dialog on a CI emulator, and without them the SDK declines to publish and then raises no
+	  callback at all - so the live check would fail as an unexplained timeout.
+	-->
+	<uses-permission android:name="android.permission.CAMERA" />
+	<uses-permission android:name="android.permission.RECORD_AUDIO" />
+	<uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+</manifest>

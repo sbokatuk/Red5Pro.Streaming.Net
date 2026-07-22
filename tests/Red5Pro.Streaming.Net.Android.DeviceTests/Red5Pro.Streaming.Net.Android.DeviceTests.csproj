@@ -1,0 +1,68 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    On-device smoke test for the packed Red5Pro.Streaming.Net.Android package. Deliberately a plain
+    .NET for Android app rather than a MAUI one: it starts faster on an emulator and its failures
+    are about the binding rather than about MAUI startup.
+
+    Driven by .github/scripts/run-android-device-tests.sh, which builds it with -t:Install against a
+    specific package version, launches it and reads the verdict from logcat.
+  -->
+  <PropertyGroup>
+    <!-- Set by the runner script; the default is the newest band so a bare build is meaningful. -->
+    <Red5DeviceTargetFramework Condition=" '$(Red5DeviceTargetFramework)' == '' ">net9.0-android35.0</Red5DeviceTargetFramework>
+    <TargetFramework>$(Red5DeviceTargetFramework)</TargetFramework>
+
+    <OutputType>Exe</OutputType>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+
+    <ApplicationId>net.red5.streaming.devicetests</ApplicationId>
+    <ApplicationVersion>1</ApplicationVersion>
+    <ApplicationDisplayVersion>1.0</ApplicationDisplayVersion>
+    <SupportedOSPlatformVersion>$(Red5AndroidMinSdk).0</SupportedOSPlatformVersion>
+
+    <!--
+      Trimming is the interesting variable here, so it is a switch rather than a fixed setting.
+      Default off: the app's job is to prove the *packaged* binding works, and a type stripped
+      because the test code never statically reaches it would be a false failure.
+      -p:Red5Trimming=full runs the same checks the way a consumer's Release build ships, which is
+      the only configuration that exercises the linker against the binding - and the one where a
+      type only Java reflection reaches goes missing.
+    -->
+    <Red5Trimming Condition=" '$(Red5Trimming)' == '' ">none</Red5Trimming>
+    <PublishTrimmed Condition=" '$(Red5Trimming)' == 'none' ">false</PublishTrimmed>
+    <PublishTrimmed Condition=" '$(Red5Trimming)' != 'none' ">true</PublishTrimmed>
+    <TrimMode Condition=" '$(Red5Trimming)' == 'sdk' ">partial</TrimMode>
+    <TrimMode Condition=" '$(Red5Trimming)' == 'full' ">full</TrimMode>
+
+    <!-- Release defaults to AOT, which the SDK only allows alongside trimming (XA1030). -->
+    <RunAOTCompilation>false</RunAOTCompilation>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      The packed .nupkg from artifacts/ (exposed by NuGet.config), never the binding project: the
+      e2e has to run against exactly what would be published.
+
+      Exact version, in brackets. A bare version is a *minimum* to NuGet, so a missing local build is
+      silently satisfied from nuget.org and the smoke test then passes against the last released
+      package instead of the one under test.
+    -->
+    <PackageReference Include="Red5Pro.Streaming.Net.Android" Version="[$(Red5PackageVersion)]" />
+
+    <!--
+      The cross-platform API, for the licence and live checks. Those talk to a real server through
+      PublishAsync, so they cover the whole stack a consumer uses rather than the binding alone; the
+      offline checks stay on the binding directly.
+    -->
+    <PackageReference Include="Red5Pro.Streaming.Net" Version="[$(Red5PackageVersion)]" />
+  </ItemGroup>
+
+  <Target Name="ValidateRed5PackageVersion" BeforeTargets="Restore;Build"
+          Condition=" '$(Red5PackageVersion)' == '' ">
+    <Error Text="Red5PackageVersion must be set, e.g. -p:Red5PackageVersion=2.1.0.2-local.7. Run build/BuildNugets.sh first." />
+  </Target>
+
+</Project>

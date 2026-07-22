@@ -129,6 +129,31 @@ public sealed partial class Red5Client : IRed5Client
         }
     }
 
+    /// <summary>
+    /// Work deferred until the licence has been validated. See <see cref="RunWhenLicensed" />.
+    /// </summary>
+    private Action? _whenLicensed;
+
+    /// <summary>
+    /// Runs <paramref name="action" /> once Red5 has accepted the licence key, or immediately if it
+    /// already has.
+    ///
+    /// Publishing or subscribing before that point is silently ignored by both SDKs. Red5's
+    /// documented sequence is build → onLicenseValidated → startPreview → publish, and calling
+    /// publish() straight after building produces no error, no callback and no stream — it
+    /// surfaces only as the operation timing out, which reads like a network problem.
+    /// </summary>
+    private void RunWhenLicensed(Action action)
+    {
+        if (IsLicenseValidated)
+        {
+            action();
+            return;
+        }
+
+        _whenLicensed = action;
+    }
+
     /// <summary>Called by the platform half when the server confirms the operation started.</summary>
     private void CompletePending() => _pending?.TrySetResult(true);
 
@@ -164,11 +189,21 @@ public sealed partial class Red5Client : IRed5Client
     {
         IsLicenseValidated = valid;
 
-        // A rejected licence is terminal, and the SDK will otherwise just never call back. Failing
-        // the pending operation here turns "publish hangs for 30 seconds" into an immediate,
-        // explanatory exception.
-        if (!valid)
+        if (valid)
         {
+            // Anything that was waiting on the licence runs now. Taken and cleared before invoking
+            // so a callback raised twice - which the SDKs do not promise not to do - cannot publish
+            // twice.
+            var deferred = _whenLicensed;
+            _whenLicensed = null;
+            deferred?.Invoke();
+        }
+        else
+        {
+            // A rejected licence is terminal, and the SDK will otherwise just never call back.
+            // Failing the pending operation here turns "publish hangs until the timeout" into an
+            // immediate, explanatory exception.
+            _whenLicensed = null;
             FailPending($"the Red5 SDK licence key was rejected: {message}");
         }
 

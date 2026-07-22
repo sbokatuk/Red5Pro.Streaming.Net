@@ -43,13 +43,26 @@ public sealed partial class Red5Client
     private void PublishCore(string streamName)
     {
         Configure(streamName);
-        _client.Publish(streamName);
+
+        // StartPreview before Publish, matching Red5's documented sequence
+        // (build -> onLicenseValidated -> startPreview -> publish). Skipping it produces
+        //
+        //     Failed to set remote answer sdp: The order of m-lines in answer doesn't match order
+        //     in offer. Rejecting answer.
+        //
+        // because the local audio and video tracks are created by startPreview, so an offer built
+        // without it does not describe the media the server answers with.
+        RunWhenLicensed(() =>
+        {
+            _client.StartPreview();
+            _client.Publish(streamName);
+        });
     }
 
     private void SubscribeCore(string streamName)
     {
         Configure(streamName);
-        _client.Subscribe(streamName);
+        RunWhenLicensed(() => _client.Subscribe(streamName));
     }
 
     /// <inheritdoc />
@@ -58,7 +71,7 @@ public sealed partial class Red5Client
         // Preview normally runs before a stream name is known, so the session is configured with
         // the placeholder the SDK will overwrite when publishing actually starts.
         Configure(_client.IsBuilt() ? StreamName ?? string.Empty : string.Empty);
-        _client.StartPreview();
+        RunWhenLicensed(_client.StartPreview);
     }
 
     /// <inheritdoc />

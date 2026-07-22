@@ -42,21 +42,38 @@ public sealed partial class Red5Client
 
     private void PublishCore(string streamName)
     {
-        Build(streamName).Publish(streamName);
+        var client = Build(streamName);
+
+        // StartPreview before Publish, matching Red5's documented sequence
+        // (build -> onLicenseValidated -> startPreview -> publish). Skipping it produces
+        //
+        //     Failed to set remote answer sdp: The order of m-lines in answer doesn't match order
+        //     in offer. Rejecting answer.
+        //
+        // because the local audio and video tracks are created by startPreview, so an offer built
+        // without it does not describe the media the server answers with.
+        RunWhenLicensed(() =>
+        {
+            client.StartPreview();
+            client.Publish(streamName);
+        });
     }
 
     private void SubscribeCore(string streamName)
     {
-        Build(streamName).Subscribe(streamName);
+        var client = Build(streamName);
+        RunWhenLicensed(() => client.Subscribe(streamName));
     }
 
     /// <inheritdoc />
     public void StartPreview()
     {
         // Preview before a session exists is the common case - it is how an app shows the camera
-        // while the user types a stream name - so the client is built on demand rather than
-        // requiring PublishAsync to have run first.
-        (_client ?? Build(_options.Host)).StartPreview();
+        // while the user types a stream name - so the client is built on demand. The stream name is
+        // empty rather than a placeholder: the SDK overwrites it when publishing actually starts,
+        // and passing something meaningless here showed up in server logs.
+        var client = _client ?? Build(string.Empty);
+        RunWhenLicensed(client.StartPreview);
     }
 
     /// <inheritdoc />
