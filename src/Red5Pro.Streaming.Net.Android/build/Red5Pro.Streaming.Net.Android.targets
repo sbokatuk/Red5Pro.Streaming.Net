@@ -39,9 +39,17 @@
                     Visible="false" />
   </ItemGroup>
 
+  <!--
+    Only applications are checked. A class library that merely compiles against the bound API does
+    not need the SDK present - it is the app that has to dex the Java classes and load the native
+    libraries - and failing the library build would force every intermediate package in a chain to
+    carry a licensed .aar it never uses.
+  -->
   <Target Name="ValidateRed5ProAndroidSdk"
           BeforeTargets="Build"
-          Condition=" '$(TargetPlatformIdentifier)' == 'android' and '$(Red5ProSkipSdkCheck)' != 'true' ">
+          Condition=" '$(TargetPlatformIdentifier)' == 'android'
+                      and '$(AndroidApplication)' == 'true'
+                      and '$(Red5ProSkipSdkCheck)' != 'true' ">
 
     <Error Condition=" '$(Red5ProAndroidSdk)' == '' "
            Code="RED5001"

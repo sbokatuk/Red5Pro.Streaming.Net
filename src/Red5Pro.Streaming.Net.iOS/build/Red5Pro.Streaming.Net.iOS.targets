@@ -53,9 +53,16 @@
     </NativeReference>
   </ItemGroup>
 
+  <!--
+    Only applications are checked - see the Android targets for why. On iOS the distinction also
+    matters because the link step, which is where a missing framework actually fails, only runs
+    for an app.
+  -->
   <Target Name="ValidateRed5ProIosSdk"
           BeforeTargets="Build"
-          Condition=" '$(TargetPlatformIdentifier)' == 'ios' and '$(Red5ProSkipSdkCheck)' != 'true' ">
+          Condition=" '$(TargetPlatformIdentifier)' == 'ios'
+                      and '$(OutputType)' == 'Exe'
+                      and '$(Red5ProSkipSdkCheck)' != 'true' ">
 
     <Error Condition=" '$(Red5ProIosSdk)' == '' "
            Code="RED5101"
