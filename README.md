@@ -4,9 +4,10 @@
 subscribe to low-latency WebRTC streams from C#, in .NET MAUI or plain .NET for Android / iOS,
 against either **Red5 Cloud** or a **standalone Red5 Pro server**.
 
-> **Status: work in progress.** The packages build, pack and pass their tests, and the iOS binding
-> has been run on a simulator. It has not published a stream yet — see [Status](#status) for exactly
-> what is proven and what is not. Nothing is on nuget.org.
+> **Status: complete but for one bug.** All four packages build, pack and pass their tests; both
+> bindings have been run on a real emulator and simulator; the sample builds for both platforms; CI
+> is in place. Publishing a live stream still fails — see [Status](#status). Nothing is on
+> nuget.org yet.
 
 ```sh
 dotnet add package Red5Pro.Streaming.Net.Maui    # MAUI apps: adds the video view
@@ -201,30 +202,37 @@ Verified on real hardware, not merely written:
 | --- | --- |
 | ✅ | Four packages build, pack and merge across all six target frameworks |
 | ✅ | 53 package tests pass, including the licence-compliance assertions |
-| ✅ | Android binding generates a real API (`IRed5WebrtcClient`, `Red5WebrtcClientBuilder`, `Red5Renderer`, libwebrtc) with the proguarded internals hidden |
-| ✅ | iOS binding links and **runs on a simulator** — five offline checks pass, and the SDK reports its own version back through .NET → binding → facade → Swift |
-| ⚠️ | Licence validation reaches Red5's server and is **rejected** — see below |
-| ⬜ | Android device tests, MAUI sample, CI workflows |
+| ✅ | Android binding generates a real API with the proguarded internals hidden |
+| ✅ | Android device tests run on an emulator — 5/5 offline, and libwebrtc, gson and okhttp all reach the dex |
+| ✅ | iOS binding links and runs on a simulator — 5/5 offline, and the SDK reports its own version back through .NET → binding → facade → Swift |
+| ✅ | MAUI sample builds for Android and iOS against the packed packages |
+| ✅ | CI packs, validates and runs the device tiers; forks skip the credentialed legs |
+| ✅ | **Red5 Cloud licence accepted on Android** |
+| ⚠️ | iOS licence rejected with the same key — platform-specific |
+| ⚠️ | Live publish fails on the emulator — see below |
 
-### The open problem: licence rejection
+### The open problem: live publish
 
-Three runs against a real Red5 Cloud stream manager:
+Publishing fails on the Android emulator with
 
-| Configuration | Red5's response |
-| --- | --- |
-| No key | `No license key provided` |
-| Red5 Pro SDK key | `License validation failed` |
-| Red5 Cloud SDK key | `License validation failed` |
+```
+Failed to set remote answer sdp: The order of m-lines in answer doesn't match order in offer
+```
 
-Two things follow. **A key is mandatory** — Red5's iOS Quick Start and Full Working Example both omit
-`setLicenseKey` and are simply wrong; configuring a client exactly as documented produces
-`No license key provided`. And **the rejection is not about either key**: the SDK distinguishes
-missing from invalid, so both are reaching a validation service and being refused, and two
-credentials from two separate accounts failing identically points at the *application*.
+That complaint is **two steps downstream of the cause**. Full logcat shows the renderer failing to
+initialise (`IllegalStateException: Already initialized` from `EglRenderer.init`), so no local video
+track is created, the offer goes out audio-only, and the server's audio+video answer cannot match it.
 
-The likeliest cause is that licences are bound to an application identity — the legacy SDK made this
-explicit with `setBundleID`, and the 2.x SDK appears to read it implicitly. Resolving it needs an
-account-side action, not a code change.
+Five hypotheses have been tested and eliminated: the emulator's `-noaudio` flag, two clients sharing
+process-wide WebRTC state, no renderer attached, the offline checks polluting EGL state, and a
+missing `startPreview` before `publish`. The remaining suspect is the renderer being initialised
+twice — once when the builder is given it, once by `publish`.
+
+**Licence validation is separately odd.** The same Red5 Cloud SDK key that Android accepts
+(`License validation successful`) is rejected on iOS. Since one platform accepts it, the account and
+key are fine. Worth knowing while reading Red5's iOS documentation: its Quick Start and Full Working
+Example both omit the mandatory `setLicenseKey`, and a client configured exactly as documented
+reports `No license key provided`.
 
 ## Known issues
 
