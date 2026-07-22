@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleIdentifier</key>
+	<string>net.red5.streaming.devicetests</string>
+	<key>CFBundleName</key>
+	<string>Red5DeviceTests</string>
+	<key>CFBundleDisplayName</key>
+	<string>Red5 device tests</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>LSRequiresIPhoneOS</key>
+	<true/>
+	<key>MinimumOSVersion</key>
+	<string>16.0</string>
+	<key>UIDeviceFamily</key>
+	<array><integer>1</integer><integer>2</integer></array>
+	<key>UILaunchStoryboardName</key>
+	<string></string>
+	<key>UISupportedInterfaceOrientations</key>
+	<array><string>UIInterfaceOrientationPortrait</string></array>
+	<!--
+	  The offline checks never open a capture device, and the licence check runs with video and
+	  audio disabled - but instantiating the SDK is enough for iOS to demand the usage strings be
+	  present, and their absence is a launch-time crash rather than a prompt.
+	-->
+	<key>NSCameraUsageDescription</key>
+	<string>Required by the Red5 SDK under test.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Required by the Red5 SDK under test.</string>
+</dict>
+</plist>
