@@ -111,6 +111,44 @@ fi
 
 fetch_xcframework "${WEBRTC_URL}" "WebRTC"
 
+# stasel's xcframework carries macos and maccatalyst slices as well as the two iOS ones, and each
+# is ~25 MB. This package is iOS-only - Red5 publishes no Catalyst slice for their own SDK, so a
+# Catalyst build could never link anyway - and shipping them took the packed NuGet to 203 MB,
+# against nuget.org's 250 MB ceiling. Dropping them is worth ~100 MB.
+strip_to_ios() {
+    local xcframework="$1"
+    python3 - "${xcframework}" <<'PY'
+import plistlib, shutil, sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+plist_path = root / "Info.plist"
+plist = plistlib.loads(plist_path.read_bytes())
+
+keep, drop = [], []
+for lib in plist["AvailableLibraries"]:
+    # SupportedPlatform is "ios" for device, simulator *and* maccatalyst; the variant is what
+    # separates them, so both have to be checked.
+    is_ios = lib["SupportedPlatform"] == "ios" and lib.get("SupportedPlatformVariant") in (None, "simulator")
+    (keep if is_ios else drop).append(lib)
+
+if not drop:
+    print("    already iOS-only")
+    sys.exit()
+
+for lib in drop:
+    shutil.rmtree(root / lib["LibraryIdentifier"], ignore_errors=True)
+    print(f"    dropped {lib['LibraryIdentifier']}")
+
+plist["AvailableLibraries"] = keep
+plist_path.write_bytes(plistlib.dumps(plist))
+print(f"    kept {', '.join(l['LibraryIdentifier'] for l in keep)}")
+PY
+}
+
+echo "==> stripping WebRTC.xcframework to iOS slices"
+strip_to_ios "${WORK_DIR}/WebRTC.xcframework"
+
 # Locates the slice inside an xcframework whose Info.plist matches a platform and (optionally) a
 # variant. Reading the plist rather than guessing directory names, because the naming differs
 # between vendors - Red5 ships ios-arm64_x86_64-simulator, stasel ships ios-arm64-simulator on

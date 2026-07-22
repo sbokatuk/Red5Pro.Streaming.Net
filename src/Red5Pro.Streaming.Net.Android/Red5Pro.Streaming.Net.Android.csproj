@@ -69,30 +69,8 @@
     <TransformFile Include="Transforms/Metadata.xml" />
   </ItemGroup>
 
-  <!--
-    Keeps both .aar files out of lib/<tfm>/.
+  <!-- The .aar packing filter lives in Directory.Build.targets; it is needed by three projects. -->
 
-    Pack="false" on an AndroidLibrary item is ignored - .NET for Android adds every bound .aar to
-    the package regardless, once per target framework - so the exclusion has to happen at the
-    NuGet layer, after the SDK has contributed its files and before NuGet writes the archive.
-
-    Two different reasons, one mechanism:
-
-      red5-android-sdk.aar   must not ship at all. The Red5 EULA forbids redistributing it
-                             (3.6, 3.7), and the default behaviour would have published it inside
-                             a public NuGet package.
-      webrtc-android.aar     may ship, and does - but once, from native/, rather than three times
-                             at 47 MB each. Left alone the package is 145 MB.
-
-    Red5Pro.Streaming.Net.PackageTests asserts both outcomes against the packed .nupkg, because
-    this is the kind of thing that silently regresses when the Android SDK changes its packing.
-  -->
-  <Target Name="Red5FilterPackagedNativeLibraries" AfterTargets="_IncludeAarInNuGetPackage">
-    <ItemGroup>
-      <TfmSpecificPackageFileWithRecursiveDir
-          Remove="@(TfmSpecificPackageFileWithRecursiveDir->WithMetadataValue('Extension', '.aar'))" />
-    </ItemGroup>
-  </Target>
 
   <!--
     Declared by the Red5 SDK's own integration instructions as `implementation` dependencies, which

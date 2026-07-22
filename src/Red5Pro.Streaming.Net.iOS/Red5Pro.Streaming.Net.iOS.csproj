@@ -17,14 +17,16 @@
     <IsBindingProject>true</IsBindingProject>
 
     <!--
-      WebRTC.xcframework is dynamic, so it cannot be embedded into this assembly and linked from
-      there - the consuming app's linker never sees it and the build fails on undefined symbols.
-      Both frameworks therefore ship as package content and are declared as NativeReference in the
-      consuming project by build/Red5Pro.Streaming.Net.iOS.targets.
+      WebRTC.xcframework is dynamic, so it cannot be embedded *inside* this assembly - the
+      consuming app's linker never sees an embedded framework and the build fails on undefined
+      symbols. With this set, .NET for iOS instead emits a sidecar <assembly>.resources.zip next to
+      the binding, carrying both frameworks, and extracts and links them during the consuming app's
+      build. That is the supported route for a dynamic NativeReference.
 
-      Our own Red5ProFacade.xcframework is static and could have been embedded, but this setting is
-      per project rather than per reference, and splitting the two across different mechanisms
-      would be harder to follow than shipping both the same way.
+      An earlier revision *also* packed the frameworks under native/ and declared them again from
+      build/*.targets. That duplicated ~36 MB four times over and took the package to 203 MB, so
+      only the sidecar remains. The .targets still exists, for the one framework this package
+      cannot ship: the consumer's own licensed Red5WebRTCKit.
     -->
     <NoBindingEmbedding>true</NoBindingEmbedding>
 
@@ -48,6 +50,7 @@
     <ObjcBindingApiDefinition Include="ApiDefinition.cs" />
     <ObjcBindingCoreSource Include="StructsAndEnums.cs" />
   </ItemGroup>
+
 
   <ItemGroup>
     <!--
@@ -82,13 +85,6 @@
   <ItemGroup>
     <None Include="../../assets/icon.png" Pack="true" PackagePath="/" Visible="false" />
     <None Include="../../README.md" Pack="true" PackagePath="/" Visible="false" />
-
-    <!--
-      Packed once at the package root rather than per target framework: WebRTC.xcframework alone is
-      ~87 MB and both are identical across all three.
-    -->
-    <None Include="lib/Red5ProFacade.xcframework/**" Pack="true" PackagePath="native/Red5ProFacade.xcframework/" Visible="false" />
-    <None Include="lib/WebRTC.xcframework/**" Pack="true" PackagePath="native/WebRTC.xcframework/" Visible="false" />
 
     <None Include="build/Red5Pro.Streaming.Net.iOS.targets" Pack="true" PackagePath="build/" Visible="false" />
   </ItemGroup>

@@ -5,19 +5,14 @@
 
   Why the package needs this:
 
-  WebRTC.xcframework is a *dynamic* framework, and a dynamic framework cannot be embedded into a
-  binding assembly and linked from there - the app's linker never sees it and the build fails with
+  Our own two frameworks - Red5ProFacade and WebRTC - travel in the binding's sidecar
+  <assembly>.resources.zip, which .NET for iOS extracts and links during the consuming app's build.
+  Nothing extra is needed for those.
 
-      Undefined symbols for architecture arm64:
-        "_OBJC_CLASS_$_R5Client", referenced from: <initial-undefines>
-
-  because the registrar passes -u for every bound Objective-C class while nothing supplies them.
-  So the frameworks ship as package content and are declared as NativeReference here, in the
-  consuming project, where the linker and the app bundler can both see them.
-
-  The third framework - Red5WebRTCKit itself - is not in this package at all. The Red5 EULA does
-  not permit redistributing it (sections 3.6 and 3.7), so the consumer supplies their own licensed
-  copy through the Red5ProIosSdk property.
+  Red5WebRTCKit is different: it is not in this package at all, because the Red5 EULA does not
+  permit redistributing it (sections 3.6 and 3.7). Our facade carries undefined references to its
+  symbols, so the consuming app must link the consumer's own licensed copy - which is what the
+  NativeReference below does, and what the check further down explains when it is missing.
 -->
 <Project>
 
@@ -30,17 +25,6 @@
   </PropertyGroup>
 
   <ItemGroup Condition=" '$(TargetPlatformIdentifier)' == 'ios' ">
-    <NativeReference Include="$(MSBuildThisFileDirectory)../native/Red5ProFacade.xcframework">
-      <Kind>Framework</Kind>
-      <Visible>false</Visible>
-    </NativeReference>
-
-    <NativeReference Include="$(MSBuildThisFileDirectory)../native/WebRTC.xcframework">
-      <Kind>Framework</Kind>
-      <Frameworks>AVFoundation AudioToolbox CoreAudio CoreMedia CoreVideo CoreGraphics VideoToolbox Metal MetalKit QuartzCore</Frameworks>
-      <Visible>false</Visible>
-    </NativeReference>
-
     <!--
       The consumer's own Red5WebRTCKit.xcframework. Our facade carries undefined references to its
       symbols, so without this the app fails at link time rather than at runtime - which is the
