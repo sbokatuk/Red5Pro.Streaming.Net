@@ -59,11 +59,14 @@ public class AppDelegate : UIApplicationDelegate
         var host = Environment.GetEnvironmentVariable("RED5_ENDPOINT");
         var isCloud = Environment.GetEnvironmentVariable("RED5_DEPLOYMENT") != "standalone";
 
-        if (string.IsNullOrEmpty(licenseKey) || string.IsNullOrEmpty(host))
+        // The endpoint is what gates this tier, not the key: Red5's documentation configures a
+        // Cloud client without a key at all, so "no key" is a case worth being able to test rather
+        // than a reason to skip.
+        if (string.IsNullOrEmpty(host))
         {
             // Reported either way, so a run with no credentials cannot be mistaken for one that
             // proved the licence works.
-            Console.WriteLine("SKIP licence validation (no RED5_LICENSE_KEY / RED5_ENDPOINT)");
+            Console.WriteLine("SKIP licence validation (no RED5_ENDPOINT)");
         }
         else
         {
@@ -90,18 +93,30 @@ public class AppDelegate : UIApplicationDelegate
                 failures++;
                 Console.WriteLine($"FAIL licence validation: {exception.Message}");
 
-                // Red5's rejection message is always the bare string "License validation failed",
-                // with no reason, so the plausible causes are listed here instead. Observed:
-                // both a Red5 Pro SDK key and a Red5 Cloud key are rejected identically against a
-                // valid stream manager endpoint, which points at the application rather than the
-                // key - Red5 licences are tied to an application identity, and this test app's
-                // bundle id (net.red5.streaming.devicetests) is not one of yours.
+                // Red5 distinguishes only two rejection messages, and the difference is the useful
+                // part:
+                //
+                //   "No license key provided"    the key never reached the SDK
+                //   "License validation failed"  a key reached it and a service said no, with no
+                //                                reason given
+                //
+                // Note that Red5's own iOS documentation omits setLicenseKey from both its Quick
+                // Start and its Full Working Example. That is wrong - configuring a Cloud client
+                // exactly as documented produces "No license key provided" - so do not conclude
+                // from those samples that the key is optional.
+                //
+                // Observed here: a Red5 Pro SDK key and a Red5 Cloud SDK key, issued by two
+                // separate accounts, are rejected identically against a valid Cloud stream manager
+                // endpoint. Two independent credentials failing the same way points at the
+                // application rather than at either key.
                 Console.WriteLine(
-                    "    Red5 reports no reason for a rejection. Things to check, in order:\n" +
-                    "      - the bundle id this app was built with is registered against the key\n" +
-                    "      - the key is the *SDK* licence, not the server licence\n" +
+                    "    Red5 gives no reason for a rejection. Things to check, in order:\n" +
+                    "      - whether the key is bound to an application identity, and if so whether\n" +
+                    "        this app's bundle id is the registered one (the legacy SDK made this\n" +
+                    "        explicit with setBundleID; the 2.x SDK appears to read it implicitly)\n" +
+                    "      - the key is the *SDK* licence, not the server licence - accounts issue both\n" +
                     "      - the key matches the deployment (a Cloud key for a Cloud endpoint)\n" +
-                    "      - the trial has not expired");
+                    "      - the trial has not expired, and has been activated if it needs it");
             }
         }
 

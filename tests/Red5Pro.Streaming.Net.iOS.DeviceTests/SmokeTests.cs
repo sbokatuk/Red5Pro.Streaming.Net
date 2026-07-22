@@ -159,9 +159,21 @@ public static class SmokeTests
 
         client.SetAppName("live");
         client.SetStreamName("licence-check");
-        client.SetLicenseKey(licenseKey);
-        client.SetVideoEnabled(false);
-        client.SetAudioEnabled(false);
+
+        // Deliberately optional. Red5's own iOS documentation configures a Red5 Cloud client
+        // *without* a licence key at all - the stream manager host is already account-bound, and
+        // onLicenseValidated still fires - while the SDK repository's QUICK_START.md and the same
+        // page's Requirements section both say a key is needed. Since the two disagree, this test
+        // can exercise either, and the runner reports which it used.
+        if (!string.IsNullOrEmpty(licenseKey))
+        {
+            client.SetLicenseKey(licenseKey);
+        }
+
+        // Left enabled: a client configured with neither track is not a shape Red5 documents, and
+        // a rejection under it would not tell us much about the normal case.
+        client.SetVideoEnabled(true);
+        client.SetAudioEnabled(true);
 
         // Build is what triggers validation; no camera or peer connection is needed for it.
         client.Build();
