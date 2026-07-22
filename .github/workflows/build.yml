@@ -1,0 +1,489 @@
+name: build
+
+# Reusable pipeline: fetches the native Red5 SDKs, packs every Red5Pro.Streaming.Net package at a
+# given version, validates the packed packages, runs the on-device tests, and uploads the packages
+# as an artifact. Callers (pr.yml, release.yml) decide the version and what to do with the result.
+#
+# Android and Apple pack on separate runners: Android needs only a JDK and the Android SDK, while
+# iOS needs Xcode. Splitting them keeps the expensive macOS runner off the Android critical path.
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: NuGet version to stamp on every package.
+        required: true
+        type: string
+      e2e-android-target-framework:
+        description: Target framework the Android emulator device test runs against.
+        required: false
+        default: net10.0-android36.0
+        type: string
+      e2e-ios-target-framework:
+        description: >
+          Which of the package's target frameworks the simulator device test runs against. Defaults
+          to net10, whose assets are produced by the merge step in BuildNugets.sh and so are the
+          ones worth proving at runtime.
+        required: false
+        default: net10.0-ios26.0
+        type: string
+      run-live-tiers:
+        description: >
+          Whether to run the licence and live-publish tiers, which need repository secrets. Callers
+          set this false for forked pull requests, where secrets are not available and the tiers
+          would otherwise fail for a reason unrelated to the change.
+        required: false
+        default: false
+        type: boolean
+
+env:
+  DOTNET_NOLOGO: 'true'
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: 'true'
+  DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
+
+jobs:
+  pins:
+    name: resolve native pins
+    runs-on: ubuntu-latest
+    outputs:
+      red5-version: ${{ steps.resolve.outputs.red5-version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: resolve
+        run: |
+          # build/pins.sh is the one place that parses Directory.Build.props.
+          . ./build/pins.sh
+          echo "red5-version=${RED5_VERSION}" >> "$GITHUB_OUTPUT"
+          {
+            echo "Binding Red5 WebRTC SDK \`${RED5_VERSION}\`"
+            echo "- Android \`${RED5_ANDROID_BUILD}\`"
+            echo "- iOS \`${RED5_IOS_BUILD}\`"
+            echo "- libwebrtc \`${RED5_WEBRTC_ANDROID_VERSION}\` / \`${RED5_WEBRTC_IOS_VERSION}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  pack-android:
+    name: pack Android
+    needs: pins
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          # 9.0.x packs net8+net9 (global.json pins it) and 10.0.x packs net10.
+          dotnet-version: |
+            9.0.x
+            10.0.x
+
+      - name: Install Android workloads for every SDK band
+        run: |
+          # Each band supplies different reference packs: net8.0-android34.0 compiles against
+          # Microsoft.Android.Ref.34 from the .NET 9 band and net10.0-android36.0 against Ref.36
+          # from the .NET 10 band. The SDK is chosen by the global.json in the working directory, so
+          # each band is installed from a scratch directory pinned to that SDK.
+          for major in 9 10; do
+            dir="${RUNNER_TEMP}/sdk${major}"
+            mkdir -p "${dir}"
+            sdk=$(dotnet --list-sdks | grep "^${major}\." | tail -1 | cut -d' ' -f1)
+            echo "installing android workload for SDK ${sdk}"
+            ( cd "${dir}" \
+              && dotnet new globaljson --sdk-version "${sdk}" --force \
+              && dotnet workload install android )
+          done
+
+      - name: Set up Android SDK platforms
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platforms;android-34 platforms;android-35 platforms;android-36'
+
+      - name: Cache the native Android artifacts
+        id: aar
+        uses: actions/cache@v4
+        with:
+          path: src/Red5Pro.Streaming.Net.Android/Jars
+          # The pinned version is part of the key: without it a build of a different pin would
+          # restore the previous one's .aar and silently bind the wrong SDK. libwebrtc is 47 MB and
+          # comes from Maven Central, so caching it is most of the saving.
+          key: red5-android-${{ needs.pins.outputs.red5-version }}-${{ hashFiles('native/android/**', 'Directory.Build.props') }}
+
+      - name: Fetch the Red5 Android SDK and libwebrtc
+        if: steps.aar.outputs.cache-hit != 'true'
+        run: ./native/android/fetch-android.sh
+
+      - name: Pack
+        run: ./build/BuildNugets.sh "${{ inputs.version }}" android
+
+      - name: Upload packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: nuget-packages-android
+          path: |
+            artifacts/*.nupkg
+            artifacts/*.snupkg
+          if-no-files-found: error
+          retention-days: 7
+
+  pack-apple:
+    name: pack iOS
+    # Also needs pack-android: the cross-platform package declares a pinned dependency on
+    # Red5Pro.Streaming.Net.Android for the Android target frameworks, and NuGet has to resolve it
+    # at restore time, so that package must already exist in artifacts/ on this runner.
+    needs: [pins, pack-android]
+    # Pinned rather than macos-latest so an image roll cannot change which Xcode versions are
+    # available to the selection step below.
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: ./.github/scripts/select-xcode.sh
+
+      - name: Download the Android package
+        uses: actions/download-artifact@v4
+        with:
+          name: nuget-packages-android
+          # NuGet.config exposes artifacts/ as the local-artifacts source.
+          path: artifacts
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          # Pinned rather than relying on the image default: this job builds the cross-platform
+          # package's Android target frameworks, and .NET for Android needs 17+.
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            9.0.x
+            10.0.x
+
+      - name: Install iOS, Android and MAUI workloads for every SDK band
+        run: |
+          # This runner needs all four:
+          #   ios, android   Red5Pro.Streaming.Net targets both platforms' TFMs, so restoring it
+          #                  needs both even though only the Apple binding is packed here
+          #   maui-*         Red5Pro.Streaming.Net.Maui is packed in the same run and its
+          #                  UseMauiCore build fails with NETSDK1147 without them
+          for major in 9 10; do
+            dir="${RUNNER_TEMP}/sdk${major}"
+            mkdir -p "${dir}"
+            sdk=$(dotnet --list-sdks | grep "^${major}\." | tail -1 | cut -d' ' -f1)
+            echo "installing ios+android+maui workloads for SDK ${sdk}"
+            ( cd "${dir}" \
+              && dotnet new globaljson --sdk-version "${sdk}" --force \
+              && dotnet workload install ios android maui-android maui-ios )
+          done
+
+      - name: Set up Android SDK platforms
+        uses: android-actions/setup-android@v3
+        with:
+          # Needed on this runner too, even though it packs the Apple side: the cross-platform
+          # package targets the Android TFMs as well, and building net8.0-android34.0 resolves
+          # android-34's android.jar (XA5207 without it).
+          packages: 'platforms;android-34 platforms;android-35 platforms;android-36'
+
+      - name: Cache the native iOS artifacts
+        id: xcframework
+        uses: actions/cache@v4
+        with:
+          path: |
+            src/Red5Pro.Streaming.Net.iOS/lib
+            native/build/ios/Red5WebRTCKit.xcframework
+          # Keyed on the pins *and* on our facade sources: changing the facade changes the
+          # framework's Objective-C surface and therefore the generated binding.
+          key: red5-ios-${{ needs.pins.outputs.red5-version }}-${{ hashFiles('native/ios/**', 'Directory.Build.props') }}
+
+      - name: Fetch the Red5 iOS SDK and build the facade
+        if: steps.xcframework.outputs.cache-hit != 'true'
+        run: ./native/ios/fetch-ios.sh
+
+      - name: Pack
+        run: ./build/BuildNugets.sh "${{ inputs.version }}" apple
+
+      # Uploaded before the sample is built so that a failure in that check still leaves the
+      # packages available to download and inspect.
+      - name: Upload packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: nuget-packages-apple
+          path: |
+            artifacts/*.nupkg
+            artifacts/*.snupkg
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Build the sample against the packed packages
+        run: |
+          # Proves the packages are actually consumable: they restore, resolve to the right platform
+          # binding per target framework, and both halves compile and link. This is the check that
+          # caught the .targets being packed under build/ instead of buildTransitive/, where they
+          # silently never ran for a transitive consumer.
+          #
+          # Debug, and iOS pinned to a simulator runtime identifier: an iOS Release build trims and
+          # AOT-compiles, which with the WebRTC framework costs most of an hour of macOS runner time
+          # for no added signal here.
+          echo "::group::sample net9.0-android35.0"
+          dotnet build samples/Red5Pro.Streaming.Net.Sample \
+            -c Debug -f net9.0-android35.0 \
+            -p:Red5PackageVersion="${{ inputs.version }}" \
+            -p:Red5ProAndroidSdk="$PWD/src/Red5Pro.Streaming.Net.Android/Jars/red5-android-sdk.aar"
+          echo "::endgroup::"
+
+          echo "::group::sample net9.0-ios18.0"
+          dotnet build samples/Red5Pro.Streaming.Net.Sample \
+            -c Debug -f net9.0-ios18.0 \
+            -p:RuntimeIdentifier=iossimulator-arm64 \
+            -p:Red5PackageVersion="${{ inputs.version }}" \
+            -p:Red5ProIosSdk="$PWD/native/build/ios/Red5WebRTCKit.xcframework"
+          echo "::endgroup::"
+
+  validate:
+    name: validate packages
+    needs: [pack-android, pack-apple]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+
+      - name: Download packages
+        uses: actions/download-artifact@v4
+        with:
+          # Both pack jobs write into artifacts/, so merging the two downloads reassembles the full
+          # set the package tests expect to find.
+          pattern: nuget-packages-*
+          merge-multiple: true
+          path: artifacts
+
+      - name: Run package tests
+        # Includes the licence-compliance assertions: no package may contain a Red5 binary, which
+        # the Red5 EULA does not permit us to redistribute. That is the one failure here that would
+        # be a legal problem rather than a bug.
+        run: dotnet test tests/Red5Pro.Streaming.Net.PackageTests --logger 'trx;LogFileName=package-tests.trx'
+
+      - name: Upload the combined package set
+        uses: actions/upload-artifact@v4
+        with:
+          name: nuget-packages
+          path: |
+            artifacts/*.nupkg
+            artifacts/*.snupkg
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: package-test-results
+          path: '**/*.trx'
+          if-no-files-found: ignore
+          retention-days: 7
+
+  e2e-android:
+    name: Android emulator (${{ matrix.tier }})
+    needs: [pack-android, validate]
+    runs-on: ubuntu-latest
+    # Gated once, at job level: a matrix leg needing secrets is skipped wholesale on a forked
+    # pull request rather than running with empty credentials, and shows as skipped in the checks
+    # list instead of as a pass that silently did nothing.
+    if: ${{ !matrix.live || inputs.run-live-tiers }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Always runs, including on forked pull requests, and needs no credentials.
+          - tier: offline
+            live: false
+            trimming: none
+          # Trimming is the one configuration where a binding can pass every desktop check and still
+          # fail at runtime, because the linker strips types only Java reflection reaches.
+          - tier: offline-trimmed
+            live: false
+            trimming: full
+          # Needs secrets, so it is gated by run-live-tiers.
+          - tier: live-cloud
+            live: true
+            trimming: none
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            9.0.x
+            10.0.x
+
+      - name: Install Android workload
+        run: |
+          mkdir -p "${RUNNER_TEMP}/sdk10"
+          ( cd "${RUNNER_TEMP}/sdk10" \
+            && dotnet new globaljson --sdk-version "$(dotnet --list-sdks | grep '^10\.' | tail -1 | cut -d' ' -f1)" --force \
+            && dotnet workload install android )
+          dotnet workload install android
+
+      - name: Set up Android SDK platforms
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platforms;android-35 platforms;android-36'
+
+      - name: Restore the native Android artifacts
+        uses: actions/cache@v4
+        with:
+          path: src/Red5Pro.Streaming.Net.Android/Jars
+          key: red5-android-${{ hashFiles('native/android/**', 'Directory.Build.props') }}
+          restore-keys: red5-android-
+
+      - name: Fetch the native Android artifacts if not cached
+        run: |
+          # The device test app needs the SDK too: the packages do not contain it, so the app has to
+          # be pointed at a copy exactly as a consumer's app would be.
+          [ -f src/Red5Pro.Streaming.Net.Android/Jars/red5-android-sdk.aar ] \
+            || ./native/android/fetch-android.sh
+
+      - name: Download packages
+        uses: actions/download-artifact@v4
+        with:
+          name: nuget-packages
+          path: artifacts
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Run device tests on emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        env:
+          RED5_TRIMMING: ${{ matrix.trimming }}
+          # Empty for the offline tiers, which makes the runner script skip the licence and live
+          # checks and the app report SKIP.
+          RED5_LICENSE_KEY: ${{ matrix.live && secrets.RED5_CLOUD_LICENSE_KEY || '' }}
+          RED5_ENDPOINT: ${{ matrix.live && secrets.RED5_CLOUD_ENDPOINT || '' }}
+          RED5_DEPLOYMENT: cloud
+        with:
+          # libwebrtc carries an x86_64 slice, so an x86_64 emulator can load
+          # libjingle_peerconnection.
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          force-avd-creation: false
+          # -camera-back emulated gives the publisher actual frames to encode; without a camera the
+          # SDK has nothing to send and the server never sees a broadcast start.
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back emulated
+          disable-animations: true
+          script: ./.github/scripts/run-android-device-tests.sh "${{ inputs.version }}" "${{ inputs.e2e-android-target-framework }}"
+
+      - name: Upload device logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-device-logs-${{ matrix.tier }}
+          path: device-tests-logcat.txt
+          if-no-files-found: ignore
+          retention-days: 7
+
+  e2e-ios:
+    name: iOS simulator (${{ matrix.tier }})
+    needs: [pack-apple, validate]
+    runs-on: macos-15
+    # Gated once, at job level: a matrix leg needing secrets is skipped wholesale on a forked
+    # pull request rather than running with empty credentials, and shows as skipped in the checks
+    # list instead of as a pass that silently did nothing.
+    if: ${{ !matrix.live || inputs.run-live-tiers }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - tier: offline
+            live: false
+            trimming: none
+          - tier: offline-trimmed
+            live: false
+            trimming: full
+          - tier: licence-cloud
+            live: true
+            trimming: none
+    steps:
+      - uses: actions/checkout@v4
+
+      # The device app is built for the package's own net10.0-ios26.0 target framework, which only
+      # builds against an Xcode carrying the iOS 26.0 SDK - see the script.
+      - name: Select Xcode
+        run: ./.github/scripts/select-xcode.sh
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            9.0.x
+            10.0.x
+
+      - name: Install iOS workload
+        run: |
+          mkdir -p "${RUNNER_TEMP}/sdk10"
+          ( cd "${RUNNER_TEMP}/sdk10" \
+            && dotnet new globaljson --sdk-version "$(dotnet --list-sdks | grep '^10\.' | tail -1 | cut -d' ' -f1)" --force \
+            && dotnet workload install ios )
+          dotnet workload install ios
+
+      - name: Restore the native iOS artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            src/Red5Pro.Streaming.Net.iOS/lib
+            native/build/ios/Red5WebRTCKit.xcframework
+          key: red5-ios-${{ hashFiles('native/ios/**', 'Directory.Build.props') }}
+          restore-keys: red5-ios-
+
+      - name: Fetch the native iOS artifacts if not cached
+        run: |
+          # The device test app links its own copy of Red5WebRTCKit, exactly as a consumer's app
+          # does, because the package does not contain it.
+          [ -d native/build/ios/Red5WebRTCKit.xcframework ] || ./native/ios/fetch-ios.sh
+
+      - name: Download packages
+        uses: actions/download-artifact@v4
+        with:
+          name: nuget-packages
+          path: artifacts
+
+      - name: Run device tests on simulator
+        env:
+          RED5_TRIMMING: ${{ matrix.trimming }}
+          RED5_LICENSE_KEY: ${{ matrix.live && secrets.RED5_CLOUD_LICENSE_KEY || '' }}
+          RED5_ENDPOINT: ${{ matrix.live && secrets.RED5_CLOUD_ENDPOINT || '' }}
+          RED5_DEPLOYMENT: cloud
+        run: ./.github/scripts/run-ios-device-tests.sh "${{ inputs.version }}" "${{ inputs.e2e-ios-target-framework }}"
+
+      - name: Upload simulator logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-device-logs-${{ matrix.tier }}
+          path: device-tests-simulator.log
+          if-no-files-found: ignore
+          retention-days: 7
