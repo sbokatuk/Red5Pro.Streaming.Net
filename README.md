@@ -140,8 +140,8 @@ what lets the package ship while the SDK does not.
 
 ## Building
 
-Requires macOS with Xcode (for iOS), a JDK 17 and an Android SDK, and the .NET 9 and 10 SDKs with
-the `android`, `ios` and `maui` workloads.
+See [docs/BUILD.md](docs/BUILD.md) for the full picture — layout, the two-pass pack, the packaging
+traps, the CI secrets table and the known issues. In short:
 
 ```sh
 ./native/android/fetch-android.sh     # Red5 .aar + libwebrtc, checksum-pinned
