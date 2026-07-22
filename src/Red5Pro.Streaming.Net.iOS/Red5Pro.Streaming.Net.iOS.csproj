@@ -1,0 +1,96 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      Set per SDK band in Directory.Build.props: the .NET 9 band builds net8+net9 and the .NET 10
+      band builds net10, so build/BuildNugets.sh packs twice and merges the results.
+    -->
+    <TargetFrameworks>$(Red5IosTargetFrameworks)</TargetFrameworks>
+    <SupportedOSPlatformVersion>$(Red5IosMinVersion)</SupportedOSPlatformVersion>
+
+    <AssemblyName>Red5Pro.Streaming.Net.iOS</AssemblyName>
+    <RootNamespace>Red5Pro.Streaming.Net.iOS</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>false</ImplicitUsings>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <IsBindingProject>true</IsBindingProject>
+
+    <!--
+      WebRTC.xcframework is dynamic, so it cannot be embedded into this assembly and linked from
+      there - the consuming app's linker never sees it and the build fails on undefined symbols.
+      Both frameworks therefore ship as package content and are declared as NativeReference in the
+      consuming project by build/Red5Pro.Streaming.Net.iOS.targets.
+
+      Our own Red5ProFacade.xcframework is static and could have been embedded, but this setting is
+      per project rather than per reference, and splitting the two across different mechanisms
+      would be harder to follow than shipping both the same way.
+    -->
+    <NoBindingEmbedding>true</NoBindingEmbedding>
+
+    <!-- CS1591: the generated binding carries no XML doc comments. -->
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <Target Name="ValidateRed5SdkBand" BeforeTargets="Build;Pack"
+          Condition=" '$(TargetFrameworks)' == '' ">
+    <Error Text="Red5SdkBand must be 'net9' or 'net10', but was '$(Red5SdkBand)'." />
+  </Target>
+
+  <Target Name="ValidateRed5NativeArtifacts" BeforeTargets="Build;Pack">
+    <Error Condition="!Exists('$(MSBuildProjectDirectory)/lib/Red5ProFacade.xcframework')"
+           Text="lib/Red5ProFacade.xcframework is missing. Run native/ios/fetch-ios.sh first." />
+    <Error Condition="!Exists('$(MSBuildProjectDirectory)/lib/WebRTC.xcframework')"
+           Text="lib/WebRTC.xcframework is missing. Run native/ios/fetch-ios.sh first." />
+  </Target>
+
+  <ItemGroup>
+    <ObjcBindingApiDefinition Include="ApiDefinition.cs" />
+    <ObjcBindingCoreSource Include="StructsAndEnums.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      Our @objc facade over Red5WebRTCKit, built from native/ios/Facade by fetch-ios.sh. Static,
+      and deliberately carrying *undefined* references to the Red5 symbols: it links against the
+      SDK rather than containing it, which is what lets this package ship while the SDK does not.
+    -->
+    <NativeReference Include="lib/Red5ProFacade.xcframework">
+      <Kind>Framework</Kind>
+    </NativeReference>
+
+    <!--
+      libwebrtc, from stasel/WebRTC - the same build Red5's own Package.swift depends on. BSD, so
+      it ships. The Frameworks list is what it dlopens; omitting them leaves the app to fail at
+      launch rather than at link time.
+    -->
+    <NativeReference Include="lib/WebRTC.xcframework">
+      <Kind>Framework</Kind>
+      <Frameworks>AVFoundation AudioToolbox CoreAudio CoreMedia CoreVideo CoreGraphics VideoToolbox Metal MetalKit QuartzCore</Frameworks>
+    </NativeReference>
+  </ItemGroup>
+
+  <!-- Packaging -->
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackageId>Red5Pro.Streaming.Net.iOS</PackageId>
+    <Title>.NET for iOS bindings for the Red5 Pro WebRTC SDK.</Title>
+    <Description>.NET for iOS / .NET MAUI bindings for the Red5 Pro WebRTC iOS SDK $(Red5Version), for publishing and subscribing to low-latency WebRTC streams through Red5 Pro or Red5 Cloud. Red5WebRTCKit exposes no Objective-C surface, so this package binds an @objc facade maintained alongside it. The Red5 SDK itself is not redistributed: supply your own licensed xcframework via the Red5ProIosSdk property. libwebrtc is bundled.</Description>
+    <PackageTags>Red5;Red5Pro;Red5Cloud;WebRTC;streaming;WHIP;WHEP;SDK;MAUI;iOS;dotnet-ios;Binding</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="../../assets/icon.png" Pack="true" PackagePath="/" Visible="false" />
+    <None Include="../../README.md" Pack="true" PackagePath="/" Visible="false" />
+
+    <!--
+      Packed once at the package root rather than per target framework: WebRTC.xcframework alone is
+      ~87 MB and both are identical across all three.
+    -->
+    <None Include="lib/Red5ProFacade.xcframework/**" Pack="true" PackagePath="native/Red5ProFacade.xcframework/" Visible="false" />
+    <None Include="lib/WebRTC.xcframework/**" Pack="true" PackagePath="native/WebRTC.xcframework/" Visible="false" />
+
+    <None Include="build/Red5Pro.Streaming.Net.iOS.targets" Pack="true" PackagePath="build/" Visible="false" />
+  </ItemGroup>
+
+</Project>
