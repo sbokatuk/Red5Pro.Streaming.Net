@@ -1,7 +1,9 @@
 using Android.App;
 using Android.OS;
 using Android.Util;
+using Android.Views;
 using Android.Widget;
+using Red5Pro.Streaming.Core;
 
 namespace Red5Pro.Streaming.Net.Android.DeviceTests;
 
@@ -27,13 +29,27 @@ public class MainActivity : Activity
     {
         base.OnCreate(savedInstanceState);
 
+        // A real renderer in a real layout: the SDK builds the local video track through it, so a
+        // headless publish without one silently degrades to audio-only. See LiveStreamTest.
+        var renderer = new Red5Renderer(this);
         var output = new TextView(this);
-        SetContentView(output);
+
+        var layout = new LinearLayout(this) { Orientation = Orientation.Vertical };
+        layout.AddView(renderer, new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MatchParent, 0, 1f));
+        layout.AddView(output, new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent));
+        SetContentView(layout);
 
         var failures = 0;
         var total = 0;
 
-        foreach (var (name, run) in SmokeTests.All)
+        // The offline checks initialise WebRTC global state - PeerConnectionFactory, EGL - which
+        // the SDK then cannot set up cleanly for a real session. The runner can skip them so the
+        // live check gets a process of its own; CI runs the two as separate launches.
+        var offline = Intent?.GetStringExtra("skipOffline") != "true";
+
+        foreach (var (name, run) in offline ? SmokeTests.All : [])
         {
             total++;
 
@@ -73,7 +89,7 @@ public class MainActivity : Activity
 
             try
             {
-                var (license, published) = await LiveStreamTest.ValidateAndPublishAsync(this, options);
+                var (license, published) = await LiveStreamTest.ValidateAndPublishAsync(this, options, renderer);
                 Log.Info(Tag, $"    {license}");
                 Log.Info(Tag, $"    {published}");
                 Log.Info(Tag, $"PASS live publish ({deployment})");

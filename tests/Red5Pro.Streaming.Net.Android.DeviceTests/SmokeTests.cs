@@ -86,18 +86,30 @@ public static class SmokeTests
     /// </summary>
     private static void Red5TypesResolve(Context context, Report report)
     {
+        // Class is resolved lazily by the runtime, so reading it is what forces the load.
         var builder = new Red5WebrtcClientBuilder();
-        var renderer = new Red5Renderer(context);
+        report($"{builder.Class.Name} resolved");
 
-        try
+        // Red5Renderer is checked by name rather than instantiated, deliberately.
+        //
+        // Constructing one initialises shared EGL state for the process, and the SDK later fails
+        // to set up its *own* renderer with
+        //
+        //     Surface renderer not initialized, initializing now...
+        //     java.lang.IllegalStateException: Already initialized
+        //         at org.webrtc.EglRenderer.init(EglRenderer.java:203)
+        //
+        // after which no local video track is created, the offer goes out audio-only, and the live
+        // publish dies with an m-line mismatch that names none of this. An offline check must not
+        // change the state the later checks run against.
+        var renderer = Java.Lang.Class.ForName("net.red5.android.core.Red5Renderer");
+
+        if (renderer is null)
         {
-            // Class is resolved lazily by the runtime, so reading it is what forces the load.
-            report($"{builder.Class.Name} and {renderer.Class.Name} resolved");
+            throw new InvalidOperationException("net.red5.android.core.Red5Renderer is missing.");
         }
-        finally
-        {
-            renderer.Release();
-        }
+
+        report($"{renderer.Name} resolved");
     }
 
     /// <summary>

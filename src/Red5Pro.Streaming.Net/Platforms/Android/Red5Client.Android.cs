@@ -44,19 +44,17 @@ public sealed partial class Red5Client
     {
         var client = Build(streamName);
 
-        // StartPreview before Publish, matching Red5's documented sequence
-        // (build -> onLicenseValidated -> startPreview -> publish). Skipping it produces
+        // Publish without an explicit StartPreview. Red5's documentation shows
+        // build -> onLicenseValidated -> startPreview -> publish, but publish() initialises the
+        // renderer itself, so calling startPreview first leaves it half-owned:
         //
-        //     Failed to set remote answer sdp: The order of m-lines in answer doesn't match order
-        //     in offer. Rejecting answer.
+        //     Surface renderer not initialized, initializing now...
+        //     java.lang.IllegalStateException: Already initialized
+        //     Cannot create video track - factory or track state invalid
         //
-        // because the local audio and video tracks are created by startPreview, so an offer built
-        // without it does not describe the media the server answers with.
-        RunWhenLicensed(() =>
-        {
-            client.StartPreview();
-            client.Publish(streamName);
-        });
+        // after which the offer carries no video m-line and the server's answer is rejected.
+        // StartPreview stays available as its own API for showing the camera before a session.
+        RunWhenLicensed(() => client.Publish(streamName));
     }
 
     private void SubscribeCore(string streamName)

@@ -1,4 +1,5 @@
 using Android.App;
+using Red5Pro.Streaming.Core;
 
 namespace Red5Pro.Streaming.Net.Android.DeviceTests;
 
@@ -30,7 +31,7 @@ public static class LiveStreamTest
     /// shape is both correct and representative.
     /// </summary>
     public static async Task<(string License, string Publish)> ValidateAndPublishAsync(
-        Activity activity, Red5Options options)
+        Activity activity, Red5Options options, Red5Renderer renderer)
     {
         var verdict = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -39,6 +40,17 @@ public static class LiveStreamTest
         var streamName = $"e2e{DateTime.UtcNow:HHmmss}";
 
         using var client = new Red5Client(options, activity);
+
+        // A renderer is not optional, even for a headless check. The Red5 Android SDK creates the
+        // local video track *through* the renderer, so without one it logs
+        //
+        //     Failed to add track to renderer - track or renderer is null
+        //     Cannot create video track - factory or track state invalid
+        //
+        // and then offers audio only. The server answers with audio and video, and the publish dies
+        // two steps later with "The order of m-lines in answer doesn't match order in offer" -
+        // which names nothing about the real cause.
+        client.SetRenderer(renderer);
 
         client.LicenseValidated += (_, e) =>
         {
