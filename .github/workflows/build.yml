@@ -10,6 +10,16 @@ name: build
 on:
   workflow_call:
     inputs:
+      verify:
+        description: >
+          Whether to run the verification jobs — package validation, the sample builds, the
+          Release link checks and the e2e suites. Pull requests leave it at true, and are the only
+          place any of this runs. Releases pass false: the tagged commit was already verified on
+          its pull request, so a tag packs and publishes and nothing more. The gate is the same
+          input, with the same name and the same meaning, in every repository.
+        required: false
+        default: true
+        type: boolean
       version:
         description: NuGet version to stamp on every package.
         required: true
@@ -224,6 +234,7 @@ jobs:
           retention-days: 7
 
       - name: Build the sample against the packed packages
+        if: ${{ inputs.verify }}
         run: |
           # Proves the packages are actually consumable: they restore, resolve to the right platform
           # binding per target framework, and both halves compile and link. This is the check that
@@ -248,8 +259,84 @@ jobs:
             -p:Red5ProIosSdk="$PWD/native/build/ios/Red5WebRTCKit.xcframework"
           echo "::endgroup::"
 
+  # Everything else here compiles the sample in Debug, which restores, resolves and links but
+  # never runs the linker or the AOT compiler — and those are what a consumer actually ships.
+  # A Release build has broken binding consumers that were green in Debug.
+  #
+  # Android only, deliberately. The pack-apple sample step above records the measurement: an iOS
+  # Release build trims and AOT-compiles against the WebRTC framework and costs most of an hour of
+  # macOS runner time, which is the opposite of what this alignment is for. Android Release turns
+  # on managed trimming and R8 for a few ubuntu minutes, so it buys most of the signal for a
+  # rounding error of the cost. If the iOS link is ever worth that hour, it belongs in its own job
+  # behind a label, not on every pull request.
+  link-release:
+    name: Release link check (Android)
+    if: ${{ inputs.verify }}
+    needs: pack-android
+    timeout-minutes: 45
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            9.0.x
+            10.0.x
+
+      - name: Install Android and MAUI workloads
+        run: |
+          mkdir -p "${RUNNER_TEMP}/sdk10"
+          ( cd "${RUNNER_TEMP}/sdk10" \
+            && dotnet new globaljson --sdk-version "$(dotnet --list-sdks | grep '^10\.' | tail -1 | cut -d' ' -f1)" --force \
+            && dotnet workload install android maui-android )
+          dotnet workload install android maui-android
+
+      - name: Set up Android SDK platforms
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platforms;android-35 platforms;android-36'
+
+      # Same as the emulator job: the packages do not carry the native SDK, so the app has to be
+      # pointed at a copy exactly as a consumer's app would be.
+      - name: Fetch the native Android artifacts if not cached
+        run: |
+          [ -f src/Red5Pro.Streaming.Net.Android/Jars/red5-android-sdk.aar ] \
+            || ./native/android/fetch-android.sh
+
+      - name: Download packages
+        uses: actions/download-artifact@v4
+        with:
+          name: nuget-packages
+          path: artifacts
+
+      - name: Link the sample in Release
+        run: |
+          tfm=net9.0-android35.0
+          dotnet build samples/Red5Pro.Streaming.Net.Sample \
+            -c Release -f "${tfm}" \
+            -p:Red5PackageVersion="${{ inputs.version }}" \
+            -p:Red5ProAndroidSdk="$PWD/src/Red5Pro.Streaming.Net.Android/Jars/red5-android-sdk.aar"
+
+          # Asserted rather than assumed: a Release build that trimmed the binding away, or that
+          # never got as far as packaging, would still leave a bin/ directory behind.
+          apk="$(find "samples/Red5Pro.Streaming.Net.Sample/bin/Release/${tfm}" -name '*.apk' | head -1)"
+          if [ -z "${apk}" ]; then
+            echo "::error::no APK under samples/Red5Pro.Streaming.Net.Sample/bin/Release/${tfm} — the Release build did not package"
+            exit 1
+          fi
+          echo "==> ${apk} ($(du -h "${apk}" | cut -f1))"
+
   validate:
     name: validate packages
+    if: ${{ inputs.verify }}
     needs: [pack-android, pack-apple]
     runs-on: ubuntu-latest
     steps:
@@ -301,7 +388,7 @@ jobs:
     # Gated once, at job level: a matrix leg needing secrets is skipped wholesale on a forked
     # pull request rather than running with empty credentials, and shows as skipped in the checks
     # list instead of as a pass that silently did nothing.
-    if: ${{ !matrix.live || inputs.run-live-tiers }}
+    if: ${{ inputs.verify && (!matrix.live || inputs.run-live-tiers) }}
     strategy:
       fail-fast: false
       matrix:
@@ -413,7 +500,7 @@ jobs:
     # Gated once, at job level: a matrix leg needing secrets is skipped wholesale on a forked
     # pull request rather than running with empty credentials, and shows as skipped in the checks
     # list instead of as a pass that silently did nothing.
-    if: ${{ !matrix.live || inputs.run-live-tiers }}
+    if: ${{ inputs.verify && (!matrix.live || inputs.run-live-tiers) }}
     strategy:
       fail-fast: false
       matrix:
