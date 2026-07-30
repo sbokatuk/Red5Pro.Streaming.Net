@@ -1,0 +1,203 @@
+name: upstream drift
+
+# The pins in Directory.Build.props are updated by hand, and nothing else watches them.
+#
+# What this can and cannot watch is worth stating, because the gaps are deliberate:
+#
+#   Red5's own SDKs      cannot be watched for new versions. Both are single binaries on a CDN
+#                        with no index (the root 404s), and the build suffix in each file name -
+#                        release.b112.red5cloud, release.b12.red5cloud - is not derivable from the
+#                        version, so a newer release cannot even be probed for by URL. Version
+#                        bumps come from account.red5.net by hand. What *is* checkable is that the
+#                        pinned artifact is still there and still the same bytes, which is exactly
+#                        what Directory.Build.props says the recorded sha256 is for: "so a silently
+#                        re-uploaded artifact fails the build rather than changing what gets bound".
+#                        Re-verifying it daily turns that from a build-time surprise into a report.
+#
+#   libwebrtc            is watched only for disappearance, never for newness. The pinned version
+#                        has to match what the Red5 SDK was built against - the .aar carries no
+#                        jniLibs at all, so every org.webrtc symbol comes from libwebrtc, and a
+#                        mismatch installs fine and then dies on the first call with
+#                        UnsatisfiedLinkError. "Newer exists upstream" is therefore not an upgrade
+#                        signal here, it is noise; it is logged to the step summary and never
+#                        filed. The same reasoning the shared check-upstream.sh applies to
+#                        maven-pom-dep rows. A pinned version that has been *yanked* is different:
+#                        the next clean build breaks, and that is a finding.
+#
+# Reports one issue per platform, so an Android re-pin and an iOS re-pin - separate changes, made
+# at different times - are tracked separately rather than piling into one thread.
+#
+# Runs daily. That only stays readable because a standing drift is silent: every report carries a
+# fingerprint of the drift it describes, so an unchanged fingerprint posts nothing, a changed one
+# adds a comment, and drift going away closes the issue.
+
+on:
+  schedule:
+    - cron: '57 6 * * *' # Daily, 06:57 UTC — off the full hour to dodge the cron rush.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    name: compare pins to upstream
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compare
+        env:
+          DRIFT_DIR: ${{ runner.temp }}/drift
+        run: |
+          set -euo pipefail
+          . ./build/pins.sh
+          mkdir -p "${DRIFT_DIR}"
+
+          # One file per platform — the reporting step turns each into its own issue, so every
+          # note has to say which platform it belongs to.
+          note() { printf -- '- %s\n' "$2" >> "${DRIFT_DIR}/$1.md"; }
+
+          # True when $2 sorts above $1. Version-aware on purpose: a plain "differs from the pin"
+          # also fires for a patch cut from an older branch, and would point the re-pin backwards.
+          newer() {
+            [ "$1" != "$2" ] && [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | tail -1)" = "$2" ]
+          }
+
+          # The pinned artifact, re-downloaded and re-hashed. Both SDKs are small - 0.6 MB and
+          # 2.6 MB - so this costs a couple of seconds a day, and it is the only integrity signal
+          # available for a closed-source binary served from a CDN under a mutable URL.
+          verify_artifact() { # verify_artifact <platform> <label> <url> <expected-sha256>
+            local actual
+            actual="$(curl -sfL --retry 3 --max-time 120 "$3" | sha256sum | cut -d' ' -f1 || true)"
+            if [ -z "${actual}" ]; then
+              note "$1" "Could not download the pinned $2 from \`$3\` — the next clean build would fail at fetch time."
+            elif [ "${actual}" != "$4" ]; then
+              note "$1" "**The pinned $2's bytes changed**: sha256 now \`${actual}\`, pinned \`$4\`. The URL and version did not change, so treat as suspicious rather than as a routine update."
+            else
+              echo "    ok  $2: sha256 matches the pin" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          }
+
+          verify_artifact android "Red5 Android .aar" \
+            "${RED5_ANDROID_AAR_URL}" "${RED5_ANDROID_AAR_SHA256}"
+          verify_artifact ios "Red5 iOS xcframework" \
+            "${RED5_IOS_XCFRAMEWORK_URL}" "${RED5_IOS_XCFRAMEWORK_SHA256}"
+
+          # libwebrtc for Android: io.github.webrtc-sdk:android on Maven Central. The pinned
+          # version must still resolve; anything newer is reported to the log only, see the header.
+          meta="$(curl -sfL --retry 3 --max-time 60 \
+            "https://repo1.maven.org/maven2/io/github/webrtc-sdk/android/maven-metadata.xml" || true)"
+          if [ -z "${meta}" ]; then
+            note android "Could not read \`io.github.webrtc-sdk:android\` maven-metadata.xml to check the pinned libwebrtc."
+          else
+            versions="$(printf '%s' "${meta}" | sed -n 's:.*<version>\([^<]*\)</version>.*:\1:p')"
+            if ! printf '%s\n' "${versions}" | grep -qxF "${RED5_WEBRTC_ANDROID_VERSION}"; then
+              note android "**libwebrtc \`${RED5_WEBRTC_ANDROID_VERSION}\` is gone from Maven Central** — it is no longer listed for \`io.github.webrtc-sdk:android\`, so the next clean build cannot fetch it."
+            else
+              latest="$(printf '%s\n' "${versions}" | sort -V | tail -1)"
+              if newer "${RED5_WEBRTC_ANDROID_VERSION}" "${latest}"; then
+                echo "    -   libwebrtc android: ${latest} exists (pinned ${RED5_WEBRTC_ANDROID_VERSION}) — not a finding, the pin must match what the Red5 SDK links against" >> "$GITHUB_STEP_SUMMARY"
+              else
+                echo "    ok  libwebrtc android: pinned ${RED5_WEBRTC_ANDROID_VERSION} is current" >> "$GITHUB_STEP_SUMMARY"
+              fi
+            fi
+          fi
+
+          # libwebrtc for iOS: stasel/WebRTC release tags. Same rule as Android.
+          webrtc_ios_repo="${RED5_WEBRTC_IOS_REPOSITORY#https://github.com/}"
+          webrtc_ios_repo="${webrtc_ios_repo%.git}"
+          if ! tags="$(gh api "repos/${webrtc_ios_repo}/releases" --paginate \
+                        --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name')"; then
+            note ios "Could not list releases for \`${webrtc_ios_repo}\` to check the pinned libwebrtc."
+          elif ! printf '%s\n' "${tags}" | grep -qxF "${RED5_WEBRTC_IOS_VERSION}"; then
+            note ios "**libwebrtc \`${RED5_WEBRTC_IOS_VERSION}\` is gone from \`${webrtc_ios_repo}\`** — the release is no longer published, so the next clean build cannot fetch it."
+          else
+            latest="$(printf '%s\n' "${tags}" | sort -V | tail -1)"
+            if newer "${RED5_WEBRTC_IOS_VERSION}" "${latest}"; then
+              echo "    -   libwebrtc ios: ${latest} exists (pinned ${RED5_WEBRTC_IOS_VERSION}) — not a finding, the pin must match what the Red5 SDK links against" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "    ok  libwebrtc ios: pinned ${RED5_WEBRTC_IOS_VERSION} is current" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          fi
+
+      - name: Report per platform
+        env:
+          DRIFT_DIR: ${{ runner.temp }}/drift
+        run: |
+          set -euo pipefail
+
+          today="$(date -u +%Y-%m-%d)"
+          resolved='<!-- upstream-drift: resolved -->'
+
+          # The search is a phrase query, so it returns every platform's issue; the exact title
+          # picks the one that belongs to this platform. Newest first, and the caller takes the
+          # first line — there should only ever be one open per platform.
+          find_issue() {
+            gh issue list --state "$1" --limit 50 \
+              --search 'in:title "Upstream drift" sort:created-desc' \
+              --json number,title --jq '.[] | "\(.number)\t\(.title)"' \
+              | awk -F'\t' -v title="$2" '$2 == title { print $1 }'
+          }
+
+          echo '## Upstream drift' >> "$GITHUB_STEP_SUMMARY"
+
+          # Every platform is visited, drift or not: a platform whose drift is gone closes its
+          # issue, which is what keeps a daily run from leaving stale ones behind.
+          for entry in 'android:Android' 'ios:iOS'; do
+            key="${entry%%:*}"
+            platform="${entry#*:}"
+            title="Upstream drift: ${platform}"
+            file="${DRIFT_DIR}/${key}.md"
+
+            matches="$(find_issue open "${title}")"
+            open_issue="${matches%%$'\n'*}"
+
+            if [ ! -s "${file}" ]; then
+              if [ -n "${open_issue}" ]; then
+                gh issue comment "${open_issue}" \
+                  --body "$(printf '%s pins match upstream again as of %s — closing.\n\n%s\n' "${platform}" "${today}" "${resolved}")"
+                gh issue close "${open_issue}"
+                printf -- '- %s: drift cleared, closed #%s\n' "${platform}" "${open_issue}" >> "$GITHUB_STEP_SUMMARY"
+              else
+                printf -- '- %s: pins match upstream\n' "${platform}" >> "$GITHUB_STEP_SUMMARY"
+              fi
+              continue
+            fi
+
+            # A daily job that re-posted the same drift every morning would be muted within a
+            # week. The fingerprint is what makes a repeat cheap to recognise: same drift, no post.
+            fingerprint="${key} $(sha256sum "${file}" | cut -c1-12)"
+            body="$(printf '**Platform: %s** — the daily upstream check saw this on %s:\n\n%s\n\nPins live in `Directory.Build.props`; `build/pins.sh` is the one place that parses them.\n\n<!-- upstream-drift: %s -->\n' \
+              "${platform}" "${today}" "$(cat "${file}")" "${fingerprint}")"
+
+            if [ -n "${open_issue}" ]; then
+              seen="$(gh issue view "${open_issue}" --json body,comments --jq '.body, .comments[].body')"
+              if [[ "${seen}" == *"${fingerprint}"* ]]; then
+                printf -- '- %s: unchanged, already on #%s\n' "${platform}" "${open_issue}" >> "$GITHUB_STEP_SUMMARY"
+              else
+                gh issue comment "${open_issue}" --body "${body}"
+                printf -- '- %s: drift changed, commented on #%s\n' "${platform}" "${open_issue}" >> "$GITHUB_STEP_SUMMARY"
+              fi
+              continue
+            fi
+
+            # Nothing open. If this exact drift was reported before and a *person* closed it —
+            # as opposed to this job closing it because upstream moved back — that was a decision
+            # to skip the update, and re-filing it tomorrow would be nagging.
+            matches="$(find_issue closed "${title}")"
+            closed_issue="${matches%%$'\n'*}"
+            if [ -n "${closed_issue}" ]; then
+              seen="$(gh issue view "${closed_issue}" --json body,comments --jq '.body, .comments[].body')"
+              if [[ "${seen}" == *"${fingerprint}"* && "${seen}" != *"${resolved}"* ]]; then
+                printf -- '- %s: same drift dismissed on #%s, not re-filing\n' "${platform}" "${closed_issue}" >> "$GITHUB_STEP_SUMMARY"
+                continue
+              fi
+            fi
+
+            url="$(gh issue create --title "${title}" --body "${body}")"
+            printf -- '- %s: opened %s\n' "${platform}" "${url}" >> "$GITHUB_STEP_SUMMARY"
+          done
